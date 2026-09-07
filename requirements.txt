@@ -1,0 +1,11 @@
+# Obrigatorio / required
+pymupdf>=1.24          # PDF reading (extrair.py, fatiar.py)
+
+# Busca semantica / semantic search (semantico.py)
+numpy>=1.26
+fastembed>=0.3
+
+# Opcionais / optional
+python-docx>=1.1       # .docx input
+pytesseract>=0.3.10    # OCR for scanned PDFs (also needs the Tesseract binary)
+pillow>=10.0           # OCR

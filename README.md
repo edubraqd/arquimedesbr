@@ -1,0 +1,385 @@
+# arquimedesbr
+
+**Turn your own library of books and papers into something a coding agent can actually read.**
+
+[Português](LEIAME.md) · English
+
+A PDF is a wall. An agent that opens one either blows its context window on 400 pages or reads nothing. `arquimedesbr` converts your documents into markdown sliced by chapter, indexes them lexically and semantically, and gives the agent a search that returns the *right 400 words* — with title, chapter and page numbers, so every claim stays checkable.
+
+No LLM in the pipeline. No network calls. No API bill. Everything runs locally.
+
+```bash
+python motor/semantico.py "how do I answer when the client says it is too expensive" --rerank --passagens --categoria vendas
+```
+
+```
+1. 0.71  Gap Selling / 07-the-problem-identification-chart.md  (p. 112-129)
+   "...the buyer's objection to price is almost never about price. It is about
+    a gap they have not yet quantified..."
+```
+
+---
+
+## Table of contents
+
+- [Why this exists](#why-this-exists)
+- [Two folders, and why they are separate](#two-folders-and-why-they-are-separate)
+- [About the books](#about-the-books)
+- [Install](#install)
+- [Adding documents](#adding-documents)
+- [Searching](#searching)
+- [What was measured](#what-was-measured)
+- [Using it from Claude Code (the skill)](#using-it-from-claude-code-the-skill)
+- [Customizing categories and domains](#customizing-categories-and-domains)
+- [Honest limits](#honest-limits)
+
+---
+
+## Why this exists
+
+RAG tutorials usually assume you want a chatbot over a corpus. This is not that. This is a **reference shelf for an agent that is doing something else** — writing copy, choosing an architecture, pricing a proposal — and needs to check what a specific book says before it commits.
+
+Three design choices follow from that:
+
+1. **Chapters, not documents.** A chapter fits in context (~8k words target). A book does not. The unit of reading is the chapter; the unit of *searching* is a 60-word passage inside it.
+2. **Citations are mandatory.** Every chapter file carries `titulo`, `autor`, `capitulo`, `paginas` in its frontmatter. If the agent cannot cite it, the agent should say the library does not cover it — not fill the gap with general knowledge dressed up as a source.
+3. **Zero recurring cost.** Extraction is PyMuPDF. Classification is keywords. Embeddings are a local MiniLM via `fastembed`. Nothing phones home.
+
+---
+
+## Two folders, and why they are separate
+
+This is the part people get wrong on the first run, so it comes before install.
+
+```
+arquimedesbr/          <- THIS REPO. the engine. code only. goes on GitHub.
+  motor/*.py
+  skill/SKILL.md
+  README.md
+
+~/Arquimedes/          <- YOUR LIBRARY (the "root"). your files. NEVER on GitHub.
+  nao-processado/      <- inbox: drop PDF / DOCX / TXT / MD here
+  processado/          <- original file, after successful conversion
+  falhas/              <- yielded no text (scanned with no OCR, corrupted)
+  removidos/           <- documents you removed on purpose; will not come back
+  markdown/
+    <category>/
+      <document>/
+        INDEX.md       <- table of contents with page numbers
+        01-chapter.md  <- frontmatter + text
+        02-chapter.md
+  manifesto.json       <- state keyed by sha256 of each original file
+  INDEX.md             <- catalog of the whole library
+  MAPA.md              <- one card per document: language, size, distinctive concepts
+  GRAFO.md             <- communities and bridges between documents
+  .indice-busca.json   <- BM25 index
+  .indice-semantico.*  <- vectors
+```
+
+**The engine is public. The library is yours and stays on your disk.** They are separate directories on purpose: your books are copyrighted material you acquired, and the conversion output is a derivative of them. Publishing the engine is fine. Publishing your `markdown/` is not.
+
+The root is resolved in this order:
+
+1. `--raiz /path/to/library` on any command;
+2. the `ARQUIMEDES_RAIZ` environment variable;
+3. `~/Arquimedes`.
+
+So you can keep the library on an external drive, a NAS, wherever — the engine never assumes.
+
+---
+
+## About the books
+
+**This repository ships no books, no excerpts, and no indexes.** It is code that processes files you already own.
+
+What goes in:
+
+| Format | Notes |
+|---|---|
+| `.pdf` | main path. Scanned PDFs go through OCR if Tesseract is installed |
+| `.docx` | needs `python-docx` |
+| `.txt`, `.md` | passed through, still sliced and catalogued |
+
+What you should feed it: books you bought, papers from arXiv or an open journal, your own notes, manuals, internal documentation, anything you have the right to read. What you should not: material you did not acquire. The tool has no opinion on this and no way to check — that judgment is yours, and the license disclaims warranty for a reason.
+
+Two practical notes learned the hard way:
+
+- **Many PDFs floating around are excerpts, not the full book.** The generated `INDEX.md` shows the real page count. Check it before concluding that a book "does not cover" a topic — it may simply not be all there.
+- **Duplicates are caught by sha256**, so the same file under a different name never enters twice. A different *edition* of the same book will enter twice, because it is in fact a different file.
+
+---
+
+## Install
+
+Requires **Python 3.10+**.
+
+```bash
+git clone https://github.com/edubraqd/arquimedesbr.git
+cd arquimedesbr
+pip install -r requirements.txt
+python instalar.py
+```
+
+`instalar.py` is optional and does nothing clever — it creates `~/Arquimedes/{nao-processado,processado,falhas,removidos,markdown}` and copies `skill/SKILL.md` into `~/.claude/skills/arquimedesbr/`. Run it with `--raiz` to put the library somewhere else, or skip it and `mkdir` yourself.
+
+Set the root once so you do not repeat `--raiz`:
+
+```bash
+export ARQUIMEDES_RAIZ="$HOME/Arquimedes"
+```
+
+```powershell
+$env:ARQUIMEDES_RAIZ = "$HOME\Arquimedes"
+```
+
+### Optional: OCR for scanned PDFs
+
+Install the Tesseract binary (`winget install tesseract-ocr.tesseract`, `brew install tesseract`, `apt install tesseract-ocr`) plus `pytesseract` and `pillow`. Extra language files can live in `motor/tessdata/` — the engine points `TESSDATA_PREFIX` at that folder when it exists, which avoids needing admin rights to write into the system install. Cost is roughly 0.5 s per page with 8 threads.
+
+Without Tesseract everything still works; a scanned PDF simply lands in `falhas/`.
+
+### Verify
+
+```bash
+python -m unittest discover -s motor -p "test_*.py"
+```
+
+56 tests. They touch neither disk nor network.
+
+---
+
+## Adding documents
+
+```bash
+cp ~/Downloads/some-book.pdf "$ARQUIMEDES_RAIZ/nao-processado/"
+```
+
+```bash
+cd motor
+python processar.py
+```
+
+Useful variants:
+
+```bash
+python processar.py --seco
+python processar.py --status
+python processar.py --limite 3
+python processar.py --so-indice
+```
+
+`--seco` is a dry run that shows the chapters it would cut and writes nothing. `--status` reports what is in the library and what failed. `--so-indice` rebuilds `INDEX.md` from the manifest without reprocessing anything.
+
+The pipeline, in one screen:
+
+```
+nao-processado/file.pdf
+   |
+   v  extrair.py    PyMuPDF reads font size and position -> headings become "##".
+   |                Strips repeated headers/footers, orphan page numbers,
+   |                line-break hyphenation and ligatures. Empty page -> OCR.
+   |
+   v  fatiar.py     Slices by chapter using the PDF bookmarks. No bookmarks ->
+   |                detects chapter starts by FONT SIZE, and only accepts the
+   |                detection if it covers the whole book; otherwise slices by
+   |                page up to a size target, so each slice still records a real
+   |                page range and citations stay checkable.
+   |                Target 8k words, min 400 (merges), max 12k (splits).
+   |
+   v  qualidade.py  Detects language (function-word profile: pt/en/es/fr/it/de/id)
+   |                and flags worthless chapters: copyright pages, tables of
+   |                contents, indexes, back-matter sales pages, degenerate text.
+   |
+   v  catalogar.py  Assigns a category by keyword (filename weighs more than
+   |                body), writes frontmatter and three levels of INDEX.md.
+   |
+   v  rotular.py    Names chapters the PDF only called "Trecho 4", using the
+                    internal heading or TF-IDF against its siblings in the same
+                    book. Writes `assunto` and `termos`, rebuilds MAPA.md.
+```
+
+After adding documents, refresh the derived layers:
+
+```bash
+python semantico.py indexar
+python rotular.py
+python grafear.py
+```
+
+The semantic index is **keyed by a hash of the chapter body, not mtime**. That matters: fixing a category or writing a language field rewrites the frontmatter of hundreds of files. Keyed by mtime, each such fix would re-embed the whole library (~40 min of CPU) without a single word of text having changed.
+
+### Curation
+
+Keyword classification gets things wrong. Fix it without reprocessing the PDF:
+
+```bash
+python processar.py --mover <document-folder> --para <category>
+python processar.py --remover <document-folder> --motivo "why it left"
+python processar.py --revisar --seco
+python processar.py --revisar
+```
+
+`--remover` deletes the markdown, moves the original to `removidos/`, and records it in the manifest so it does not come back on the next run. `--revisar` applies new rules (language detection, chapter discards) across the whole library in seconds, without reopening a single PDF.
+
+---
+
+## Searching
+
+**Cut the corpus before you choose the method.** This decides more than the method does.
+
+| Filter | When |
+|---|---|
+| `--categoria <cat>` | the question has an obvious address. **This is what pays.** |
+| `--dominio comercial` | copy, pricing, proposals, positioning, UX |
+| `--dominio tecnico` | architecture, stack, models, metrics |
+| `--dominio pessoal` | whatever you put there |
+
+Then, in order:
+
+**1. Semantic + reranker — the default.**
+
+```bash
+python semantico.py "how to answer that it is too expensive" --rerank --passagens --categoria vendas
+```
+
+`--rerank` costs ~6 s and is worth it: a cross-encoder reads the question together with each passage, instead of comparing vectors computed without ever seeing the question.
+
+`--passagens` is the small-to-big trick. Search compares 60-word passages — measured to be the size the model separates best — but returns the **~420-word window around the hit**, aligned to sentence boundaries (`--janela N` changes it). You usually get the answer without opening the chapter at all.
+
+**2. BM25 when the target is literal** — an acronym, a proper noun, jargon (`FTP`, `useEffect`, `borrow checker`). Query in **both languages**:
+
+```bash
+python buscar.py "objecao de preco" --tambem "price objection" --n 6 --trechos
+```
+
+**3. Read the document's `INDEX.md`** before the chapter — it has the table of contents with page numbers and word counts.
+
+**4. Read only the chapter the search pointed at.** Never the whole book.
+
+**5. The graph, for questions about relations** — "what connects X and Y", "who else talks about this":
+
+```bash
+python grafear.py --ponte "pricing"
+python grafear.py
+```
+
+The graph measures shared vocabulary, not semantics — it will sometimes cluster by language. Do not read kinship into mere adjacency.
+
+**Do not use `--hibrido`.** Fusing the two rankings measures worse than either one alone: fusion gives equal weight to a strong and a weak method.
+
+---
+
+## What was measured
+
+Numbers below come from `avaliar_dominio.py` against a 53-question ground truth (`gabarito.py`), scored at document level, over a real library of 77 documents / 818 chapters, on 2026-09-07.
+
+| Method | hit@1 | hit@3 | MRR |
+|---|---|---|---|
+| BM25 bilingual | 8/53 | 39/53 | 0.456 |
+| BM25 + `--dominio` | 16/53 | 42/53 | 0.547 |
+| BM25 + `--categoria` | 32/53 | 47/53 | 0.746 |
+| semantic | 20/53 | 34/53 | 0.543 |
+| semantic + `--dominio` | 21/53 | 36/53 | 0.567 |
+| semantic + `--categoria` | 37/53 | 46/53 | 0.806 |
+| semantic + rerank | 29/53 | 41/53 | 0.669 |
+| semantic + rerank + `--dominio` | 32/53 | 43/53 | 0.710 |
+| **semantic + rerank + `--categoria`** | **43/53** | **48/53** | **0.869** |
+
+Three readings that matter:
+
+1. **`--categoria` carries more than the reranker does.** Alone it scores 37/53; the reranker alone scores 29/53. Together, 43/53. They add up — they are not alternatives.
+2. **`--dominio` barely helps semantic search** (20 to 21 without rerank, 29 to 32 with). The embedding already separates domains. In BM25 it is the opposite — it doubles hit@1 (8 to 16), because lexical search collides terms across domains easily.
+3. **Query in both languages for BM25.** hit@1 does not move (8/53 either way) but hit@3 triples (13 to 39) and MRR doubles. Monolingual sometimes hits, rarely ranks the target near the top.
+
+Two caveats, stated plainly:
+
+- These numbers use the *target's* category, so they are a **ceiling**: they measure the gain available to someone who picks the filter correctly. Getting the domain wrong is hard; getting the category wrong is easy. When torn between two categories, use `--dominio` instead of guessing.
+- They were measured on **one specific library with one specific set of questions.** Yours will differ. Write your own `gabarito.py` and re-run `avaliar_dominio.py` — that is the point of shipping the evaluator.
+
+### What was measured and did *not* work
+
+Kept here so nobody spends a day rediscovering it.
+
+| Idea | Measured result |
+|---|---|
+| **Auto-predicting the category** (`prever_categoria.py`) | 29 to 30/53. The right category is the top guess only 52% of the time, and filtering on a wrong guess drops hit@3 (38 to 35). Let a human — or the agent, which has conversation context — pass `--categoria`. |
+| **e5-large instead of MiniLM** | worse MRR, and 127 min to index versus 13 |
+| **Hybrid rank fusion** (`--hibrido`) | 0.645 versus 0.713 for semantic+rerank alone |
+| **Recovering 1.3M lost words** (a real extraction bug) | 43 to 44/53. The recovered content is real, but the ground truth does not ask about it. Fixing the corpus did not move the metric; better targeting did. |
+
+### The extraction canary
+
+Every ingested PDF is checked against PyMuPDF's own raw `get_text()`. Below 80% coverage it warns immediately and records the ratio in the manifest (`razao_extracao`).
+
+It exists because a real failure went unnoticed for months: discarded whitespace spans were gluing together text from LaTeX PDFs, and 13 documents entered with 22–74% of their content and no error on screen. If you are building something like this, build the canary first.
+
+---
+
+## Using it from Claude Code (the skill)
+
+`skill/SKILL.md` installs as a Claude Code skill named **arquimedesbr**. Once installed at `~/.claude/skills/arquimedesbr/SKILL.md`, Claude consults the library on its own before writing copy, pricing something, or picking an architecture — and cites title + chapter + pages.
+
+```bash
+mkdir -p ~/.claude/skills/arquimedesbr && cp skill/SKILL.md ~/.claude/skills/arquimedesbr/
+```
+
+Then, in any project: `/arquimedesbr`, or just ask "what do the books say about pricing objections?"
+
+The skill body tells the agent the consult order above, the honest limits, and — importantly — **to say the library does not cover a topic rather than answer from general knowledge while implying a source**. That instruction is the difference between a useful shelf and a confident liar.
+
+It works with any agent that reads a system prompt, not only Claude Code. The file is plain markdown; paste it wherever your agent takes instructions.
+
+---
+
+## Customizing categories and domains
+
+Default categories live in `motor/catalogar.py` (`ROTULOS`), and reflect one person's shelf:
+
+`vendas` · `marketing` · `copy-persuasao` · `posicionamento-negocio` · `ux-conversao` · `design-arte` · `engenharia-software` · `frontend` · `python` · `rust` · `ia-llm` · `agentes-llm` · `dados-ml` · `ciencia-cognitiva` · `treino-endurance` · `matematica` · `busca-recuperacao` · `mercado-setorial` · `geral`
+
+Change them to match your own. Each entry is a label plus the keywords that select it; the filename weighs more than the body.
+
+Domains group categories and can be remapped **without touching code**, via a `dominio.json` at the root of your library:
+
+```json
+{
+  "comercial": ["vendas", "copy-persuasao", "posicionamento-negocio"],
+  "tecnico": ["python", "rust", "ia-llm"],
+  "pessoal": ["treino-endurance"]
+}
+```
+
+A category that exists in the library but in no domain is included in **all** of them — so a newly added document never silently disappears from search.
+
+### Where to change what
+
+| I want to change | File |
+|---|---|
+| passage size, overlap, embedding model | `semantico.py` (`PASSAGEM_PALAVRAS`, `AVANCO`, `MODELO`) |
+| chapter size, slicing rule | `fatiar.py` (`ALVO_PALAVRAS`, `MAX_PALAVRAS`) |
+| categories and keywords | `catalogar.py` (`ROTULOS`) |
+| heading/footer detection, cleanup | `extrair.py` |
+| what counts as a worthless chapter | `qualidade.py` |
+| ranking | `buscar.py` (`bm25`, `_PARADAS`) |
+| where the library lives | `raiz.py` |
+
+---
+
+## Honest limits
+
+- **Tables become sequences of numbers.** Math formulas become noise. Two-column PDFs can scramble reading order. This is structural, not a bug to be fixed.
+- **Category classification is deterministic keyword matching. It errs.** Trust the search, which scans the full text, over the category.
+- **The graph measures shared vocabulary**, so it sometimes groups by language rather than by topic.
+- **The code and CLI flags are in Portuguese.** `buscar` = search, `processar` = process, `--seco` = dry run, `--raiz` = root, `--categoria` = category. The docs are bilingual; the code was not rewritten, because renaming a working system is how working systems break. A full glossary is in [LEIAME.md](LEIAME.md#glossario-pt--en).
+- **First indexing is slow** — roughly 40 minutes of CPU for ~90k passages. After that it is incremental and a new book costs seconds.
+- **Everything here was built for one person's shelf and then generalized.** Where a default looks arbitrary, it probably encodes a measurement on a corpus that is not yours. Re-measure.
+
+---
+
+## Prior art / credit
+
+The small-to-big retrieval pattern — search small passages, return the window around them — is described in *Building LLMs for Production*, chapter "Advanced RAG Techniques", pp. 220–229.
+
+Built with [Claude Code](https://claude.com/claude-code). Contributions welcome, especially measurements on libraries that look nothing like the one this was tuned on.
+
+MIT licensed. See [LICENSE](LICENSE).

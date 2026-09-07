@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+*.bak
+*.bak-*
+
+# A base do usuario nunca entra no repositorio.
+# The user's own library never belongs in this repository.
+markdown/
+nao-processado/
+processado/
+falhas/
+removidos/
+graphify-out/
+manifesto.json
+grafo.json
+trilhas.jsonl
+INDEX.md
+MAPA.md
+GRAFO.md
+.indice-*.json
+.indice-*.npz
+.centroides-*.npz
+motor/tessdata/
+motor/log-*.txt
+motor/.*.json
+motor/.*.sh
