@@ -188,6 +188,17 @@ CATEGORIAS = {
         ["mathematics", "matematica", "calculus", "algebra", "trigonometry", "theorem",
          "integral", "derivative"],
     ),
+    "idiomas": (
+        "Idiomas e material didatico de lingua",
+        # existe para nao poluir `ux-conversao`: guia de professor de ingles
+        # casava "exercise"/"unit"/"activity" e caia la, dentro da categoria que
+        # a operacao usa para msg1 e landing. `geral` seria o outro destino, mas
+        # de la o `--categoria` nao alcanca.
+        ["teacher's guide", "teachers guide", "guia do professor", "student's book",
+         "workbook", "grammar exercise", "vocabulary unit", "esl", "efl",
+         "language course", "curso de idiomas", "livro do aluno", "phrasal verb",
+         "gramatica inglesa", "espanhol comercial", "manual de estilo"],
+    ),
     "mercado-setorial": (
         "Estudos de mercado e setor",
         ["market overview", "wine", "vinho", "fintech", "catalogue", "industry report",
@@ -219,6 +230,25 @@ def titulo_de(caminho: Path, doc) -> str:
     return bruto or caminho.stem
 
 
+# Termo curto casa dentro de outra palavra e manda documento para a categoria
+# errada. Medido em 09/09/2026: "cro" (ux-conversao) acertava 8 vezes na ficha
+# tecnica de um guia de professor, e "rust" casa dentro de "trust" -- palavra
+# que aparece o tempo todo em livro de vendas. Termo curto de uma palavra so
+# passa a exigir fronteira; frase de duas palavras nao precisa, ja e especifica.
+_LIMITE_CURTO = 4
+_regex_curto: dict = {}
+
+
+def _ocorrencias(termo: str, texto: str) -> int:
+    if len(termo) > _LIMITE_CURTO or " " in termo:
+        return texto.count(termo)
+    rx = _regex_curto.get(termo)
+    if rx is None:
+        rx = _regex_curto[termo] = re.compile(
+            rf"(?<![a-z0-9]){re.escape(termo)}(?![a-z0-9])")
+    return len(rx.findall(texto))
+
+
 def classificar(caminho: Path, titulo: str, amostra: str) -> str:
     nome = (caminho.stem + " " + titulo).lower().replace("-", " ")
     corpo = amostra.lower()
@@ -226,9 +256,9 @@ def classificar(caminho: Path, titulo: str, amostra: str) -> str:
     for categoria, (_rotulo, termos) in CATEGORIAS.items():
         pontos = 0
         for termo in termos:
-            if termo in nome:
+            if _ocorrencias(termo, nome):
                 pontos += 6
-            pontos += min(corpo.count(termo), 8)
+            pontos += min(_ocorrencias(termo, corpo), 8)
         if pontos:
             placar[categoria] = pontos
     if not placar:

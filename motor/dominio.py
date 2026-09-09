@@ -75,6 +75,8 @@ DOMINIOS: dict[str, tuple[str, ...]] = {
     ),
     "pessoal": (
         "treino-endurance",
+        # material de idioma: nao e comercial nem tecnico
+        "idiomas",
         # entrou em 09/09/2026 com a leva de value investing (Graham, Klarman,
         # Munger). Nao e "comercial": nada disso serve para vender site nem PDV.
         "financas-investimentos",

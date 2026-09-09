@@ -364,6 +364,44 @@ class CapituloIlegivel(unittest.TestCase):
         self.assertIn("valido", buscar.ler_capitulo(f))
 
 
+class TermoCurtoExigeFronteira(unittest.TestCase):
+    """Palavra-chave curta nao pode casar dentro de outra palavra.
+
+    Medido em 09/09/2026: "cro" (ux-conversao) acertava 8 vezes na ficha
+    tecnica de um guia de professor de ingles e mandava o livro para a
+    categoria que a operacao usa em msg1 e landing. Puxando o fio, "rust"
+    casa dentro de "trust" -- palavra constante em livro de vendas. Os testes
+    de `ownership` e `cargo` logo abaixo tratavam sintomas da mesma causa,
+    escolhendo termos mais longos em vez de exigir fronteira.
+    """
+
+    def test_termo_curto_nao_casa_dentro_de_palavra(self):
+        self.assertEqual(catalogar._ocorrencias("cro", "creditos autorais macro"), 0)
+        self.assertEqual(catalogar._ocorrencias("rust", "building trust frustrated"), 0)
+
+    def test_termo_curto_casa_quando_e_a_palavra(self):
+        self.assertEqual(catalogar._ocorrencias("rust", "a linguagem rust e boa"), 1)
+        self.assertEqual(catalogar._ocorrencias("cro", "otimizacao cro na pagina"), 1)
+
+    def test_frase_continua_casando_como_substring(self):
+        # frase de duas palavras ja e especifica: nao precisa de fronteira, e
+        # exigir uma quebraria casamento no meio de texto corrido
+        self.assertEqual(
+            catalogar._ocorrencias("gap selling", "sobre gap selling, o metodo"), 1)
+
+    def test_trust_nao_manda_livro_de_vendas_para_rust(self):
+        corpo = "building trust with the customer, trust is earned " * 30
+        self.assertNotEqual(
+            catalogar.classificar(Path("gap-selling.pdf"), "Gap Selling", corpo),
+            "rust")
+
+    def test_livro_de_rust_de_verdade_continua_em_rust(self):
+        corpo = ("a linguagem rust usa o borrow checker e cargo build " * 30)
+        self.assertEqual(
+            catalogar.classificar(Path("rust-book.pdf"), "The Rust Book", corpo),
+            "rust")
+
+
 class TipoDeDocumento(unittest.TestCase):
     def test_tese_precisa_de_duas_marcas(self):
         uma = "o orientador: sugeriu ler o livro sobre vendas"
