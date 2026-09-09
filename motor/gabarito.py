@@ -1,6 +1,6 @@
 """Gabarito de avaliacao da busca: pergunta -> documentos que deveriam responder.
 
-ESTE E UM GABARITO DE EXEMPLO. As 53 perguntas abaixo apontam para os livros de
+ESTE E UM GABARITO DE EXEMPLO. As perguntas abaixo apontam para os livros de
 UMA base especifica -- a que gerou os numeros do README. Se os seus livros forem
 outros, os alvos nao existem e o avaliador vai medir zero.
 
@@ -10,9 +10,9 @@ pedacos do nome da pasta do documento que deveria responder. Depois rode
 
 ---
 
-THIS IS AN EXAMPLE GROUND TRUTH. The 53 questions below point at the books of
-ONE specific library -- the one that produced the README numbers. With a
-different shelf the targets do not exist and the evaluator will score zero.
+THIS IS AN EXAMPLE GROUND TRUTH. The questions below point at the books of ONE
+specific library -- the one that produced the README numbers. With a different
+shelf the targets do not exist and the evaluator will score zero.
 
 To measure YOUR library: replace `PERGUNTAS` with your own questions, each with
 the fragments of the target document folder name. Then run `avaliar_dominio.py`.

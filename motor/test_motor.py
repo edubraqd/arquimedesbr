@@ -9,6 +9,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 import buscar
@@ -114,6 +115,205 @@ class Utilidade(unittest.TestCase):
         self.assertFalse(qualidade.avaliar("1. Intro", "so vinte palavras " * 5)[0])
 
 
+class PontilhadoDeSumario(unittest.TestCase):
+    """Contar pontilhado nao basta; o que separa e quanto do texto ele ocupa.
+
+    Em 09/09/2026 a regra por contagem (>= 12 runs) tirou da busca 23 dos 34
+    capitulos de Security Analysis: o OCR das tabelas financeiras produz
+    pontilhado no meio de prosa legitima. Medido nos 27 capitulos afetados,
+    sumario de verdade fica entre 15,8% e 48,7% do texto em pontos; capitulo
+    de conteudo com tabela nao passa de 5,5%.
+    """
+
+    def test_sumario_de_verdade_sai_da_busca(self):
+        # titulo neutro de proposito: quem tem de disparar e a regra de
+        # pontilhado, nao a de titulo de apoio
+        linha = "Capitulo sobre alguma coisa . . . . . . . . . . . . . . 54\n"
+        util, motivo = qualidade.avaliar("Trecho 1", linha * 40)
+        self.assertFalse(util)
+        self.assertIn("pontilhado", motivo)
+
+    def prosa(self, linhas=80, por_linha=15):
+        """Texto variado e em varias linhas.
+
+        Repetir a mesma frase cai na regra de vocabulario degenerado, e um
+        paragrafo unico faz as linhas de tabela virarem maioria e disparar a
+        regra de indice remissivo -- nenhuma das duas e a que se testa aqui.
+        """
+        return "\n".join(
+            " ".join(f"conceito{(i * por_linha + j) % 400} analise{j % 97}"
+                     for j in range(por_linha))
+            for i in range(linhas))
+
+    def test_prosa_com_tabela_financeira_continua_na_busca(self):
+        # o caso Security Analysis: pontilhado existe, mas afogado em prosa
+        tabela = "Net earnings . . . . . 1,240\n" * 20
+        util, motivo = qualidade.avaliar("Depreciation", self.prosa() + tabela)
+        self.assertTrue(util, motivo)
+
+    def test_poucos_pontilhados_nunca_descartam(self):
+        util, motivo = qualidade.avaliar(
+            "Capitulo", self.prosa() + "referencia . . . . 4\n" * 5)
+        self.assertTrue(util, motivo)
+
+
+class Epub(unittest.TestCase):
+    """EPUB e zip de XHTML: entra com stdlib, sem dependencia nova.
+
+    Uma Pagina por documento do spine (e nao um bloco unico como o .docx),
+    porque o spine ja e a ordem de leitura -- assim o fatiamento cai em
+    fronteira de capitulo e a citacao aponta para um lugar real.
+    """
+
+    CONTAINER = (
+        '<?xml version="1.0"?>'
+        '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+        '<rootfiles><rootfile full-path="OEBPS/livro.opf"'
+        ' media-type="application/oebps-package+xml"/></rootfiles></container>'
+    )
+
+    def opf(self, titulo="Livro de Teste", itens=("c1", "c2")):
+        manifesto = "".join(
+            f'<item id="{i}" href="{i}.xhtml" media-type="application/xhtml+xml"/>'
+            for i in itens)
+        spine = "".join(f'<itemref idref="{i}"/>' for i in itens)
+        return (
+            '<?xml version="1.0"?>'
+            '<package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+            '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            f'<dc:title>{titulo}</dc:title><dc:creator>Alguem</dc:creator>'
+            '</metadata>'
+            f'<manifest>{manifesto}</manifest><spine>{spine}</spine></package>'
+        )
+
+    def xhtml(self, h, corpo):
+        return (f'<html><head><title>x</title><style>p{{color:red}}</style></head>'
+                f'<body><h1>{h}</h1><p>{corpo}</p></body></html>')
+
+    def montar(self, titulo="Livro de Teste", capitulos=None):
+        capitulos = capitulos or {
+            "c1": ("Primeiro capitulo", "Texto do primeiro capitulo aqui."),
+            "c2": ("Segundo capitulo", "Texto do segundo capitulo aqui."),
+        }
+        destino = Path(self.tmp) / "livro.epub"
+        with zipfile.ZipFile(destino, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", self.CONTAINER)
+            z.writestr("OEBPS/livro.opf", self.opf(titulo, tuple(capitulos)))
+            for nome, (h, corpo) in capitulos.items():
+                z.writestr(f"OEBPS/{nome}.xhtml", self.xhtml(h, corpo))
+        return destino
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_uma_pagina_por_documento_do_spine(self):
+        doc = extrair.extrair_epub(self.montar())
+        self.assertEqual(len(doc.paginas), 2)
+        self.assertEqual(doc.extrator, "epub")
+        self.assertEqual(doc.autor, "Alguem")
+
+    def test_titulo_h1_vira_cabecalho_markdown(self):
+        doc = extrair.extrair_epub(self.montar())
+        self.assertIn("## Primeiro capitulo", doc.paginas[0].md)
+
+    def test_css_e_script_nao_entram_no_texto(self):
+        doc = extrair.extrair_epub(self.montar())
+        self.assertNotIn("color:red", doc.paginas[0].md)
+
+    def test_respeita_a_ordem_do_spine(self):
+        doc = extrair.extrair_epub(self.montar())
+        self.assertIn("primeiro", doc.paginas[0].md.lower())
+        self.assertIn("segundo", doc.paginas[1].md.lower())
+
+    def test_extensao_reconhecida_pelo_despachante(self):
+        self.assertIn(".epub", extrair.EXTENSOES)
+        doc = extrair.extrair(self.montar())
+        self.assertEqual(doc.extrator, "epub")
+
+    def test_epub_sem_texto_falha_em_vez_de_entrar_vazio(self):
+        vazio = {"c1": ("", "")}
+        with self.assertRaises(ValueError):
+            extrair.extrair_epub(self.montar(capitulos=vazio))
+
+
+class TituloDeEpubReempacotado(unittest.TestCase):
+    """Quem reempacota epub costuma por o nome do arquivo como titulo."""
+
+    def test_tira_extensao_escapes_e_site(self):
+        bruto = r"The Challenger Sale: Taking Control   \( PDFDrive.com \).epub"
+        self.assertEqual(extrair._limpar_titulo_epub(bruto),
+                         "The Challenger Sale: Taking Control")
+
+    def test_titulo_limpo_fica_intacto(self):
+        for bom in ("Gap Selling", "SPIN Selling: 2nd Edition"):
+            with self.subTest(titulo=bom):
+                self.assertEqual(extrair._limpar_titulo_epub(bom), bom)
+
+    def test_parenteses_que_nao_sao_site_ficam(self):
+        bruto = "Fluent Python (2nd Edition)"
+        self.assertEqual(extrair._limpar_titulo_epub(bruto), bruto)
+
+
+class TravaEEscritaDoIndice(unittest.TestCase):
+    """Duas rodadas juntas corromperam um indice de 151 MB em 09/09/2026.
+
+    A segunda leu o .npz no meio da escrita da primeira: BadZipFile e 40 min
+    de CPU para refazer. A trava impede a corrida; a escrita atomica impede
+    que uma rodada morta no meio deixe arquivo pela metade.
+    """
+
+    def setUp(self):
+        self.raiz = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.raiz, ignore_errors=True)
+
+    def test_segunda_indexacao_simultanea_e_recusada(self):
+        with semantico.travar(self.raiz):
+            with self.assertRaises(semantico.IndiceEmUso):
+                with semantico.travar(self.raiz):
+                    pass
+
+    def test_trava_sai_do_disco_no_fim(self):
+        with semantico.travar(self.raiz):
+            self.assertTrue((self.raiz / semantico.ARQ_TRAVA).exists())
+        self.assertFalse((self.raiz / semantico.ARQ_TRAVA).exists())
+
+    def test_trava_sai_do_disco_mesmo_com_erro(self):
+        with self.assertRaises(ZeroDivisionError):
+            with semantico.travar(self.raiz):
+                1 / 0
+        self.assertFalse((self.raiz / semantico.ARQ_TRAVA).exists())
+
+    def test_escrita_atomica_preserva_a_extensao(self):
+        # np.savez_compressed acrescenta ".npz" sozinho: se o temporario for
+        # "x.npz.parcial", o que ele escreve e "x.npz.parcial.npz" e o
+        # os.replace troca um arquivo que nunca existiu
+        vistos = []
+        destino = self.raiz / ".indice-semantico.npz"
+        semantico.escrever_atomico(
+            destino, lambda p: (vistos.append(p.suffix), p.write_bytes(b"ok")))
+        self.assertEqual(vistos[0], ".npz")
+        self.assertEqual(destino.read_bytes(), b"ok")
+
+    def test_falha_no_meio_nao_deixa_destino_corrompido(self):
+        destino = self.raiz / ".indice-semantico.npz"
+        destino.write_bytes(b"indice bom de antes")
+
+        def explode(p):
+            p.write_bytes(b"metade")
+            raise OSError("disco cheio")
+
+        with self.assertRaises(OSError):
+            semantico.escrever_atomico(destino, explode)
+        self.assertEqual(destino.read_bytes(), b"indice bom de antes")
+        self.assertEqual(list(self.raiz.glob("*.parcial*")), [])
+
+
 class TipoDeDocumento(unittest.TestCase):
     def test_tese_precisa_de_duas_marcas(self):
         uma = "o orientador: sugeriu ler o livro sobre vendas"
@@ -154,6 +354,51 @@ class CanarioDeExtracao(unittest.TestCase):
     def test_escaneado_nao_dispara_alarme_falso(self):
         # PDF imagem tem cru ~0 e o OCR e que produz o texto
         self.assertEqual(processar._julgar_extracao(60_000, 120), (0.0, ""))
+
+
+class DpiSeguroNoOcr(unittest.TestCase):
+    """Pagina gigante nao pode estourar o limite de pixels do PIL.
+
+    Security Analysis (735 pag.) tem pagina que a 300 dpi renderiza 1,8 bilhao
+    de pixels; o PIL barra como decompression bomb e, na versao antiga, o erro
+    subia ate derrubar a fila inteira de 21 arquivos no sexto.
+    """
+
+    class _Rect:
+        def __init__(self, w, h):
+            self.width, self.height = w, h
+
+    class _Pagina:
+        def __init__(self, w, h):
+            self.rect = DpiSeguroNoOcr._Rect(w, h)
+
+    def _pixels(self, page, dpi):
+        return (page.rect.width * dpi / 72.0) * (page.rect.height * dpi / 72.0)
+
+    def test_pagina_normal_mantem_o_dpi(self):
+        # A4 a 300 dpi da ~8,7 MPix: bem abaixo do teto, nao mexe
+        pagina = self._Pagina(595, 842)
+        self.assertEqual(extrair._dpi_seguro(pagina, 300), 300)
+
+    def test_pagina_gigante_baixa_o_dpi(self):
+        # o caso real: pagina enorme que a 300 dpi passa de 1,7 GPix
+        pagina = self._Pagina(8000, 11000)
+        dpi = extrair._dpi_seguro(pagina, 300)
+        self.assertLess(dpi, 300)
+        self.assertLessEqual(self._pixels(pagina, dpi), extrair.MAX_PIXELS_OCR)
+
+    def test_pagina_absurda_ainda_respeita_o_teto(self):
+        # nao existe piso de dpi: o teto de pixels vence sempre, porque
+        # reconhecer mal e melhor que perder a pagina e a fila atras dela
+        pagina = self._Pagina(200000, 200000)
+        dpi = extrair._dpi_seguro(pagina, 300)
+        self.assertGreaterEqual(dpi, 1)
+        self.assertLessEqual(self._pixels(pagina, dpi), extrair.MAX_PIXELS_OCR)
+
+    def test_pagina_sem_retangulo_nao_quebra(self):
+        class Vazia:
+            rect = None
+        self.assertEqual(extrair._dpi_seguro(Vazia(), 300), 300)
 
 
 class Limpeza(unittest.TestCase):
@@ -437,6 +682,33 @@ class Dominio(unittest.TestCase):
         for cats in dominio.DOMINIOS.values():
             vistas.extend(cats)
         self.assertEqual(len(vistas), len(set(vistas)))
+
+
+class IndiceSemantico(unittest.TestCase):
+    """Metadado que muda sem o corpo mudar tem de chegar na busca."""
+
+
+    def test_assinatura_muda_com_titulo(self):
+        a = semantico._assinatura_meta({"titulo": "Antigo", "capitulo": "1"})
+        b = semantico._assinatura_meta({"titulo": "Novo", "capitulo": "1"})
+        self.assertNotEqual(a, b)
+
+    def test_assinatura_muda_com_util(self):
+        a = semantico._assinatura_meta({"titulo": "X", "util": "sim"})
+        b = semantico._assinatura_meta({"titulo": "X", "util": "nao"})
+        self.assertNotEqual(a, b)
+
+    def test_assinatura_ignora_campo_que_a_busca_nao_usa(self):
+        a = semantico._assinatura_meta({"titulo": "X", "autor": "Fulano"})
+        b = semantico._assinatura_meta({"titulo": "X", "autor": "Sicrano"})
+        self.assertEqual(a, b)
+
+    def test_meta_da_passagem_cai_no_caminho_quando_falta_campo(self):
+        caminho = Path("markdown/vendas/livro-x/03-cap.md")
+        meta = semantico._meta_da_passagem({}, caminho)
+        self.assertEqual(meta["titulo"], "livro-x")
+        self.assertEqual(meta["categoria"], "vendas")
+        self.assertEqual(meta["idioma"], "xx")
 
 
 if __name__ == "__main__":

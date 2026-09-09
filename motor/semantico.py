@@ -16,8 +16,10 @@ roda em CPU). Baixa uma vez e fica em cache.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
+import os
 import sys
 import textwrap
 import time
@@ -35,6 +37,57 @@ from raiz import RAIZ_PADRAO  # noqa: E402
 MODELO = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 ARQ_VETORES = ".indice-semantico.npz"
 ARQ_META = ".indice-semantico.json"
+ARQ_TRAVA = ".indice-semantico.lock"
+
+
+class IndiceEmUso(RuntimeError):
+    pass
+
+
+@contextlib.contextmanager
+def travar(raiz: Path):
+    """Uma indexacao por vez.
+
+    Em 09/09/2026 duas rodadas de `indexar` correram juntas e a segunda leu o
+    .npz no meio da escrita da primeira: `BadZipFile`, indice de 151 MB
+    inutilizado e 40 min de CPU para refazer. O_EXCL e a checagem barata que
+    evita repetir isso.
+    """
+    trava = raiz / ARQ_TRAVA
+    try:
+        fd = os.open(trava, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise IndiceEmUso(
+            f"ja existe uma indexacao em andamento ({trava}).\n"
+            f"    Se nenhuma estiver rodando, apague o arquivo e tente de novo."
+        ) from None
+    try:
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            trava.unlink()
+
+
+def escrever_atomico(destino: Path, escreve) -> None:
+    """Escreve num temporario e so entao troca pelo destino.
+
+    `np.savez_compressed` direto no destino deixa arquivo pela metade quando a
+    rodada morre no meio -- e o que sobra nao e recuperavel, so refazivel.
+    """
+    # o ".parcial" vai ANTES da extensao: `np.savez_compressed` acrescenta
+    # ".npz" sozinho quando o nome nao termina nisso, e um temporario
+    # "...npz.parcial" viraria "...npz.parcial.npz" -- o os.replace trocaria
+    # um arquivo que nunca foi escrito
+    temporario = destino.with_name(destino.stem + ".parcial" + destino.suffix)
+    try:
+        escreve(temporario)
+        os.replace(temporario, destino)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            temporario.unlink()
+        raise
 
 # Passagem curta, e nao "o maior que couber na janela". Medido nesta base com a
 # consulta "objecao de preco cliente acha caro" contra dois capitulos-alvo
@@ -97,13 +150,42 @@ def _normalizar(v: np.ndarray) -> np.ndarray:
     return v / n
 
 
+CAMPOS_META = ("titulo", "capitulo", "categoria", "idioma", "paginas")
+
+
+def _meta_da_passagem(campos: dict, caminho: Path) -> dict:
+    """Metadado que a busca mostra. Sai sempre do frontmatter atual."""
+    return {
+        "titulo": campos.get("titulo", caminho.parent.name),
+        "capitulo": campos.get("capitulo", caminho.stem),
+        "categoria": campos.get("categoria", caminho.parent.parent.name),
+        "idioma": campos.get("idioma", "xx"),
+        "paginas": campos.get("paginas", ""),
+    }
+
+
+def _assinatura_meta(campos: dict) -> str:
+    """Hash so dos campos que a busca exibe ou filtra, mais `util`."""
+    bruto = "\x00".join(str(campos.get(c, "")) for c in CAMPOS_META)
+    bruto += "\x00" + str(campos.get("util", ""))
+    return hashlib.sha1(bruto.encode("utf-8")).hexdigest()[:12]
+
+
 def indexar(raiz: Path, refazer: bool = False) -> dict:
     meta_path, vet_path = raiz / ARQ_META, raiz / ARQ_VETORES
     antigo = {}
     vetores_antigos = None
     if not refazer and meta_path.exists() and vet_path.exists():
-        antigo = json.loads(meta_path.read_text(encoding="utf-8"))
-        vetores_antigos = np.load(vet_path)["v"]
+        try:
+            antigo = json.loads(meta_path.read_text(encoding="utf-8"))
+            vetores_antigos = np.load(vet_path)["v"]
+        except Exception as e:
+            # indice truncado ou de versao anterior: dizer o que fazer vale mais
+            # que um traceback de zipfile no meio de uma rodada de 40 min
+            raise RuntimeError(
+                f"indice ilegivel ({e.__class__.__name__}: {e}).\n"
+                f"    Reconstrua do zero: python semantico.py indexar --refazer"
+            ) from e
 
     hashes_antigos = antigo.get("hashes", {})
     passagens_antigas = antigo.get("passagens", [])
@@ -113,19 +195,35 @@ def indexar(raiz: Path, refazer: bool = False) -> dict:
     # reembutir a base inteira (~40 min de CPU) sem uma palavra de texto ter
     # mudado. Por hash do corpo, essa revisao custa zero embedding.
     arquivos = _arquivos(raiz)
-    atuais, corpos = {}, {}
+    atuais, corpos, campos_por_arq, metas = {}, {}, {}, {}
     for p in arquivos:
         rel = str(p.relative_to(raiz)).replace("\\", "/")
         bruto = p.read_text(encoding="utf-8", errors="replace")
         corpo = _corpo(bruto)
+        campos = _frontmatter(bruto)
         atuais[rel] = hashlib.sha1(corpo.encode("utf-8")).hexdigest()[:16]
         corpos[rel] = (bruto, corpo)
+        campos_por_arq[rel] = campos
+        metas[rel] = _assinatura_meta(campos)
     mudaram = [c for c, h in atuais.items() if hashes_antigos.get(c) != h]
     sumiram = [c for c in hashes_antigos if c not in atuais]
 
-    if not mudaram and not sumiram and vetores_antigos is not None:
+    # Metadado muda sem o corpo mudar: corrigir um titulo, trocar o idioma,
+    # marcar `util: nao`. O hash do corpo nao ve nada disso — e de proposito,
+    # para nao reembutir a base inteira — mas as passagens mantidas vinham
+    # copiadas do indice antigo, com o metadado velho junto. Medido em 07/09:
+    # dois titulos corrigidos a mao continuaram errados na busca depois de
+    # `indexar`, que respondeu "nada mudou". Aqui a mudanca e detectada e o
+    # metadado das mantidas e reescrito do frontmatter, sem custar embedding.
+    metas_antigas = antigo.get("metas", {})
+    meta_mudou = [c for c, h in metas.items() if metas_antigas.get(c) != h]
+
+    if not mudaram and not sumiram and not meta_mudou and vetores_antigos is not None:
         print(f"nada mudou - {len(passagens_antigas)} passagens no indice")
         return antigo
+
+    if not mudaram and not sumiram:
+        print(f"{len(meta_mudou)} arquivo(s) com metadado novo, nenhum corpo alterado")
 
     print(f"{len(mudaram)} arquivo(s) novo(s)/alterado(s), {len(sumiram)} sumido(s)")
 
@@ -134,7 +232,15 @@ def indexar(raiz: Path, refazer: bool = False) -> dict:
         (i, p) for i, p in enumerate(passagens_antigas)
         if p["caminho"] in atuais and p["caminho"] not in mudaram
     ]
-    mantidas = [p for _, p in guardar]
+    # o vetor e reaproveitado, o metadado e relido: sao coisas separadas.
+    # Passagem que virou `util: nao` sai agora, senao ficaria no indice ate
+    # alguem mexer no texto dela.
+    guardar = [(i, p) for i, p in guardar
+               if campos_por_arq[p["caminho"]].get("util") != "nao"]
+    mantidas = [
+        {**p, **_meta_da_passagem(campos_por_arq[p["caminho"]], raiz / p["caminho"])}
+        for _i, p in guardar
+    ]
     vetores_mantidos = (
         vetores_antigos[[i for i, _ in guardar]]
         if vetores_antigos is not None and guardar
@@ -149,18 +255,8 @@ def indexar(raiz: Path, refazer: bool = False) -> dict:
         if campos.get("util") == "nao":
             continue    # nao gasta embedding em copyright, sumario ou indice
         for ini, n, texto in _passagens(corpo):
-            novas.append(
-                {
-                    "caminho": caminho,
-                    "ini": ini,
-                    "n": n,
-                    "titulo": campos.get("titulo", p.parent.name),
-                    "capitulo": campos.get("capitulo", p.stem),
-                    "categoria": campos.get("categoria", p.parent.parent.name),
-                    "idioma": campos.get("idioma", "xx"),
-                    "paginas": campos.get("paginas", ""),
-                }
-            )
+            novas.append({"caminho": caminho, "ini": ini, "n": n,
+                          **_meta_da_passagem(campos, p)})
             textos.append(texto)
 
     if textos:
@@ -183,9 +279,13 @@ def indexar(raiz: Path, refazer: bool = False) -> dict:
     todos = np.vstack([vetores_mantidos, novos_vetores]) if len(mantidas) else novos_vetores
     passagens = mantidas + novas
 
-    np.savez_compressed(vet_path, v=todos)
-    meta = {"modelo": MODELO, "hashes": atuais, "passagens": passagens}
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    meta = {"modelo": MODELO, "hashes": atuais, "metas": metas,
+            "passagens": passagens}
+    # vetores primeiro: se a troca do meta falhar, o .npz novo ainda casa com o
+    # meta velho pelos hashes, e a rodada seguinte reconstroi so a diferenca
+    escrever_atomico(vet_path, lambda p: np.savez_compressed(p, v=todos))
+    escrever_atomico(meta_path, lambda p: p.write_text(
+        json.dumps(meta, ensure_ascii=False), encoding="utf-8"))
     print(f"indice: {len(passagens)} passagens, {todos.nbytes / 1e6:.1f} MB")
     return meta
 
@@ -387,7 +487,12 @@ def main() -> int:
         ap.print_help()
         return 1
     if args.consulta[0] == "indexar":
-        indexar(args.raiz, refazer=args.refazer)
+        try:
+            with travar(args.raiz):
+                indexar(args.raiz, refazer=args.refazer)
+        except IndiceEmUso as e:
+            print(f"erro: {e}")
+            return 1
         return 0
 
     consulta = " ".join(args.consulta)

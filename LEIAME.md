@@ -98,6 +98,7 @@ O que entra:
 | Formato | Observação |
 |---|---|
 | `.pdf` | caminho principal. PDF escaneado passa por OCR se o Tesseract estiver instalado |
+| `.epub` | só stdlib. Uma "página" por documento do spine, então o corte cai em fronteira de capítulo de verdade |
 | `.docx` | precisa de `python-docx` |
 | `.txt`, `.md` | entram direto, e mesmo assim são fatiados e catalogados |
 
@@ -145,7 +146,7 @@ Sem Tesseract tudo continua funcionando; o PDF escaneado apenas cai em `falhas/`
 python -m unittest discover -s motor -p "test_*.py"
 ```
 
-56 testes. Não tocam disco nem rede.
+81 testes. Não tocam disco nem rede.
 
 ---
 
@@ -316,6 +317,17 @@ Todo PDF ingerido é conferido contra o próprio `get_text()` cru do PyMuPDF. Ab
 
 Existe porque uma falha real passou meses sem ninguém ver: spans de espaço descartados colavam o texto de PDF em LaTeX, e 13 documentos entraram com 22% a 74% do conteúdo, sem erro nenhum na tela. Se você for construir algo assim, construa o canário primeiro.
 
+### Regra de descarte precisa de proporção, não de contagem
+
+O motor descarta capítulo que na verdade é sumário. A primeira regra contava os pontilhados (`. . . . . 54`) e cortava acima de 12.
+
+Essa regra jogou fora 23 dos 34 capítulos de um *Security Analysis* escaneado de 735 páginas — cerca de 180 mil palavras de prosa real sobre bonds e depreciação. O livro é cheio de tabela financeira, e o OCR transforma o pontilhado de cada linha num run de pontos.
+
+Medido nos 27 capítulos em que a regra já tinha disparado: sumário de verdade gasta **15,8% a 48,7%** dos caracteres em pontilhado; capítulo de conteúdo com tabela não passa de **5,5%**. O corte agora é essa fração, não a contagem.
+
+A lição geral, que custou um dia: **contagem absoluta é limiar disfarçado sobre o tamanho do documento.** Toda regra do tipo "mais de N ocorrências" dispara em documento longo e passa batido em documento curto. Transforme em proporção e meça onde as duas populações de fato se separam.
+
+
 ---
 
 ## Usar pelo Claude Code (a skill)
@@ -338,7 +350,7 @@ Funciona com qualquer agente que leia um prompt de sistema, não só o Claude Co
 
 As categorias padrão ficam em `motor/catalogar.py` (`ROTULOS`) e refletem a estante de uma pessoa:
 
-`vendas` · `marketing` · `copy-persuasao` · `posicionamento-negocio` · `ux-conversao` · `design-arte` · `engenharia-software` · `frontend` · `python` · `rust` · `ia-llm` · `agentes-llm` · `dados-ml` · `ciencia-cognitiva` · `treino-endurance` · `matematica` · `busca-recuperacao` · `mercado-setorial` · `geral`
+`vendas` · `marketing` · `copy-persuasao` · `posicionamento-negocio` · `ux-conversao` · `design-arte` · `engenharia-software` · `frontend` · `python` · `rust` · `ia-llm` · `agentes-llm` · `dados-ml` · `ciencia-cognitiva` · `financas-investimentos` · `treino-endurance` · `matematica` · `busca-recuperacao` · `mercado-setorial` · `geral`
 
 Troque pelas suas. Cada entrada é um rótulo mais as palavras-chave que o selecionam; o nome do arquivo pesa mais que o corpo.
 
@@ -348,7 +360,7 @@ Domínios agrupam categorias e podem ser remanejados **sem editar código**, por
 {
   "comercial": ["vendas", "copy-persuasao", "posicionamento-negocio"],
   "tecnico": ["python", "rust", "ia-llm"],
-  "pessoal": ["treino-endurance"]
+  "pessoal": ["treino-endurance", "financas-investimentos"]
 }
 ```
 

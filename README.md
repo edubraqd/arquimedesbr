@@ -97,6 +97,7 @@ What goes in:
 | Format | Notes |
 |---|---|
 | `.pdf` | main path. Scanned PDFs go through OCR if Tesseract is installed |
+| `.epub` | stdlib only. One "page" per spine document, so slicing lands on real chapter boundaries |
 | `.docx` | needs `python-docx` |
 | `.txt`, `.md` | passed through, still sliced and catalogued |
 
@@ -144,7 +145,7 @@ Without Tesseract everything still works; a scanned PDF simply lands in `falhas/
 python -m unittest discover -s motor -p "test_*.py"
 ```
 
-56 tests. They touch neither disk nor network.
+81 tests. They touch neither disk nor network.
 
 ---
 
@@ -313,6 +314,17 @@ Every ingested PDF is checked against PyMuPDF's own raw `get_text()`. Below 80% 
 
 It exists because a real failure went unnoticed for months: discarded whitespace spans were gluing together text from LaTeX PDFs, and 13 documents entered with 22–74% of their content and no error on screen. If you are building something like this, build the canary first.
 
+### Discard heuristics need a ratio, not a count
+
+The pipeline drops chapters that are really tables of contents. The first rule counted runs of leader dots (`. . . . . 54`) and discarded above 12.
+
+That rule threw away 23 of the 34 chapters of a 735-page scanned copy of *Security Analysis* — roughly 180,000 words of real prose about bonds and depreciation. The book is full of financial tables, and OCR turns each table's leader dots into a run.
+
+Measured across the 27 chapters the rule had ever fired on: a genuine table of contents spends **15.8%–48.7%** of its characters on dotted runs; a content chapter with tables never passes **5.5%**. The threshold is now that fraction, not the count.
+
+The general lesson, which cost a day: **an absolute count is a threshold on document length in disguise.** Any rule of the form "more than N occurrences" will fire on long documents and miss short ones. Make it a ratio and measure where the two populations actually separate.
+
+
 ---
 
 ## Using it from Claude Code (the skill)
@@ -335,7 +347,7 @@ It works with any agent that reads a system prompt, not only Claude Code. The fi
 
 Default categories live in `motor/catalogar.py` (`ROTULOS`), and reflect one person's shelf:
 
-`vendas` · `marketing` · `copy-persuasao` · `posicionamento-negocio` · `ux-conversao` · `design-arte` · `engenharia-software` · `frontend` · `python` · `rust` · `ia-llm` · `agentes-llm` · `dados-ml` · `ciencia-cognitiva` · `treino-endurance` · `matematica` · `busca-recuperacao` · `mercado-setorial` · `geral`
+`vendas` · `marketing` · `copy-persuasao` · `posicionamento-negocio` · `ux-conversao` · `design-arte` · `engenharia-software` · `frontend` · `python` · `rust` · `ia-llm` · `agentes-llm` · `dados-ml` · `ciencia-cognitiva` · `financas-investimentos` · `treino-endurance` · `matematica` · `busca-recuperacao` · `mercado-setorial` · `geral`
 
 Change them to match your own. Each entry is a label plus the keywords that select it; the filename weighs more than the body.
 
@@ -345,7 +357,7 @@ Domains group categories and can be remapped **without touching code**, via a `d
 {
   "comercial": ["vendas", "copy-persuasao", "posicionamento-negocio"],
   "tecnico": ["python", "rust", "ia-llm"],
-  "pessoal": ["treino-endurance"]
+  "pessoal": ["treino-endurance", "financas-investimentos"]
 }
 ```
 

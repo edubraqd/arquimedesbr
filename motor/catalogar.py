@@ -33,14 +33,17 @@ CATEGORIAS = {
         ["positioning", "posicionamento", "obviously awesome", "expertise", "pricing",
          "precificacao", "billable hour", "subscription", "automatic customer",
          "luxury strategy", "personal brand", "marca pessoal", "mom test", "blueprint",
-         "niche", "nicho", "proposal", "retainer", "alchemy", "sutherland"],
+         "niche", "nicho", "proposal", "retainer", "alchemy", "sutherland",
+         "grand slam offer", "oferta irresistivel", "value equation",
+         "hormozi", "montar a oferta", "equacao de valor"],
     ),
     "marketing": (
         "Marketing, conteudo e marca",
         ["marketing de conteudo", "content marketing", "biblia do marketing",
          "inbound", "branding", "midia social", "social media", "seo",
          "audiencia", "funil de marketing", "campanha", "neuromarketing",
-         "neurovendas", "publicidade", "anuncio", "engajamento"],
+         "neurovendas", "publicidade", "anuncio", "engajamento", "instagram", "tiktok", "influenciador",
+         "rede social", "midia paga"],
     ),
     "ux-conversao": (
         "UX, usabilidade e conversao",
@@ -100,6 +103,17 @@ CATEGORIAS = {
          "terminal agent", "plugin marketplace", "self-improving agent",
          "context engineering", "tool response", "agente autonomo"],
     ),
+    "seguranca-llm": (
+        "Seguranca de LLM e agentes",
+        # separado de ia-llm porque o balde generico de IA passou de 30
+        # documentos e deixou de filtrar. Medido em 07/09: `--categoria` e a
+        # maior alavanca da busca, e ela so vale enquanto a categoria e estreita.
+        ["prompt injection", "injecao de prompt", "jailbreak", "adversarial",
+         "exfiltration", "exfiltracao", "threat model", "attack surface",
+         "superficie de ataque", "red team", "guardrail", "sandbox escape",
+         "data poisoning", "model extraction", "trust attack", "seguranca",
+         "vulnerability", "vulnerabilidade", "malicious"],
+    ),
     "busca-recuperacao": (
         "Busca e recuperacao de informacao",
         # o assunto do proprio motor desta base: sai de dados-ml para nao ficar
@@ -117,10 +131,23 @@ CATEGORIAS = {
          "data mining", "bandit", "clustering", "time series", "serie temporal",
          "probability", "modelo preditivo", "feature", "dataset"],
     ),
+    "financas-investimentos": (
+        "Financas e investimentos",
+        # "value investing" e a marca do nicho; "acoes"/"bolsa" sozinhos traem
+        # (acao tambem e acao de codigo), entao vem sempre com par financeiro
+        ["value investing", "margin of safety", "security analysis", "graham",
+         "warren buffett", "charlie munger", "berkshire", "intrinsic value",
+         "valor intrinseco", "bolsa de valores", "mercado financeiro", "renda fixa",
+         "acionista", "dividendo", "dividend", "portfolio de investimento",
+         "carteira de acoes", "balanco patrimonial", "demonstracao financeira",
+         "fluxo de caixa descontado", "price-earnings", "investidor", "investing",
+         "hedge fund", "wall street", "tesouro direto", "cdb", "juros compostos"],
+    ),
     "ciencia-cognitiva": (
         "Ciencia cognitiva e comportamento",
         ["neuroscience", "neurociencia", "cognitive", "social brain", "dunbar",
-         "behaviour", "comportamento", "empathy", "psychology"],
+         "behaviour", "comportamento", "empathy", "psychology", "habito", "habit", "hipnose", "hypnosis",
+         "smartphone use", "screen time", "attention span", "kahneman", "vies cognitivo"],
     ),
     "treino-endurance": (
         "Treino e nutricao esportiva",
@@ -132,7 +159,8 @@ CATEGORIAS = {
         ["principles of art", "aesthetic", "estetica", "generative art",
          "generative algorithm", "arte generativa", "composicao visual",
          "parametric design", "grasshopper", "sculpture", "painting",
-         "teoria da arte", "expression", "craft"],
+         "teoria da arte", "expression", "craft", "universal principles of design",
+         "principles of design", "tipografia", "typeface", "grid system", "design system"],
     ),
     "matematica": (
         "Matematica",

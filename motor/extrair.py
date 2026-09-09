@@ -10,9 +10,13 @@ import os
 import re
 import shutil
 import statistics
+import zipfile
 from collections import Counter
 from dataclasses import dataclass, field
-from pathlib import Path
+from html.parser import HTMLParser
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote
+from xml.etree import ElementTree
 
 import fitz  # PyMuPDF
 
@@ -51,6 +55,27 @@ def ocr_disponivel() -> bool:
 # idiomas extras (por, spa) ficam aqui e entram por --tessdata-dir.
 TESSDATA = Path(__file__).parent / "tessdata"
 
+# Teto de pixels por pagina no OCR. Existe porque Security Analysis (735 pag.
+# escaneadas) tem pagina que a 300 dpi vira 1,8 bilhao de pixels: o PIL barra
+# como "decompression bomb" (limite ~179 MPix) e a pagina inteira se perde.
+# Acima de ~40 MPix o Tesseract tambem nao reconhece nada a mais -- o ganho de
+# resolucao morre bem antes disso.
+MAX_PIXELS_OCR = 40_000_000
+
+
+def _dpi_seguro(page, dpi: int) -> int:
+    """Reduz o dpi so quando a pagina renderizada passaria de MAX_PIXELS_OCR."""
+    r = getattr(page, "rect", None)
+    if r is None or r.width <= 0 or r.height <= 0:
+        return dpi
+    pixels = (r.width * dpi / 72.0) * (r.height * dpi / 72.0)
+    if pixels <= MAX_PIXELS_OCR:
+        return dpi
+    # sem piso de dpi de proposito: pagina que so cabe abaixo de 72 dpi vai
+    # reconhecer mal, e isso e melhor que estourar o limite do PIL e perder a
+    # pagina inteira -- ou, como aconteceu em 09/09, a fila inteira atras dela.
+    return max(1, int(dpi * (MAX_PIXELS_OCR / pixels) ** 0.5))
+
 
 def idiomas_ocr(desejados=("por", "eng", "spa")) -> str:
     """So pede a Tesseract idioma que ele realmente tem.
@@ -84,7 +109,7 @@ def _ocr_pagina(page, idiomas: str | None = None, dpi: int = 300) -> str:
     # por espaco, entao o caminho entre aspas chegava literal ao Tesseract
     if TESSDATA.exists():
         os.environ["TESSDATA_PREFIX"] = str(TESSDATA)
-    pix = page.get_pixmap(dpi=dpi)
+    pix = page.get_pixmap(dpi=_dpi_seguro(page, dpi))
     img = Image.open(io.BytesIO(pix.tobytes("png")))
     return pytesseract.image_to_string(img, lang=idiomas or idiomas_ocr())
 
@@ -110,14 +135,21 @@ def _ocr_em_lote(doc, indices: list, lang: str, progresso=None,
 
     def reconhecer(par):
         indice, bruto = par
-        img = Image.open(io.BytesIO(bruto))
-        return indice, _normalizar(pytesseract.image_to_string(img, lang=lang))
+        try:
+            img = Image.open(io.BytesIO(bruto))
+            return indice, _normalizar(pytesseract.image_to_string(img, lang=lang))
+        except Exception as e:
+            # uma pagina ilegivel nao pode custar as outras 734
+            print(f"    aviso: OCR falhou na pagina {indice + 1}: "
+                  f"{e.__class__.__name__}")
+            return indice, ""
 
     saida = {}
     with ThreadPoolExecutor(max_workers=threads) as pool:
         for inicio in range(0, len(indices), threads * 3):
             lote = indices[inicio: inicio + threads * 3]
-            imagens = [(i, doc[i].get_pixmap(dpi=dpi).tobytes("png")) for i in lote]
+            imagens = [(i, doc[i].get_pixmap(dpi=_dpi_seguro(doc[i], dpi)).tobytes("png"))
+                       for i in lote]
             for indice, texto in pool.map(reconhecer, imagens):
                 saida[indice] = texto
             if progresso:
@@ -344,6 +376,14 @@ def _bloco_para_md(b: dict, corpo: float, bordas: set) -> str:
 def extrair_pdf(caminho: Path, usar_ocr: bool = True,
                 minimo_palavras: int = 25, progresso=None) -> Documento:
     doc = fitz.open(caminho)
+    try:
+        return _extrair_pdf_aberto(doc, usar_ocr, minimo_palavras, progresso)
+    finally:
+        doc.close()
+
+
+def _extrair_pdf_aberto(doc, usar_ocr: bool, minimo_palavras: int,
+                        progresso) -> Documento:
     meta = doc.metadata or {}
     titulo = (meta.get("title") or "").strip()
     autor = (meta.get("author") or "").strip()
@@ -389,7 +429,6 @@ def extrair_pdf(caminho: Path, usar_ocr: bool = True,
         i + 1: titulo
         for i, titulo in aberturas_de_capitulo(brutos, corpo).items()
     }
-    doc.close()
     return Documento(
         titulo=titulo,
         autor=autor,
@@ -438,7 +477,153 @@ def extrair_texto(caminho: Path) -> Documento:
     )
 
 
-EXTENSOES = {".pdf", ".docx", ".txt", ".md", ".markdown"}
+# ----------------------------------------------------------------------- epub
+
+
+def _sem_ns(tag: str) -> str:
+    """`{http://www.idpf.org/2007/opf}spine` -> `spine`."""
+    return tag.rsplit("}", 1)[-1].lower()
+
+
+class _HtmlParaTexto(HTMLParser):
+    """XHTML de capitulo -> texto com os titulos virando `##`.
+
+    Nao usa BeautifulSoup de proposito: o motor inteiro roda em stdlib + pymupdf,
+    e epub e so zip com XHTML dentro.
+    """
+
+    IGNORAR = {"script", "style", "head", "svg"}
+    QUEBRA = {"p", "div", "br", "li", "tr", "blockquote", "section", "figcaption"}
+    TITULO = {"h1": 2, "h2": 2, "h3": 3, "h4": 4, "h5": 5, "h6": 6}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.pedacos: list[str] = []
+        self._mudo = 0
+        self._titulo: int | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.IGNORAR:
+            self._mudo += 1
+        elif tag in self.TITULO:
+            self.pedacos.append("\n\n" + "#" * self.TITULO[tag] + " ")
+            self._titulo = self.TITULO[tag]
+        elif tag in self.QUEBRA:
+            self.pedacos.append("\n\n")
+
+    def handle_endtag(self, tag):
+        if tag in self.IGNORAR:
+            self._mudo = max(0, self._mudo - 1)
+        elif tag in self.TITULO:
+            self._titulo = None
+            self.pedacos.append("\n\n")
+        elif tag in self.QUEBRA:
+            self.pedacos.append("\n\n")
+
+    def handle_data(self, dado):
+        if self._mudo:
+            return
+        # dentro de titulo a quebra de linha do XHTML viraria "## " orfao
+        self.pedacos.append(" ".join(dado.split()) if self._titulo else dado)
+
+    def texto(self) -> str:
+        bruto = "".join(self.pedacos)
+        return re.sub(r"\n{3,}", "\n\n", _normalizar(bruto)).strip()
+
+
+_EXT_EBOOK = re.compile(r"\.(epub|mobi|azw3?|pdf)\s*$", re.I)
+_SITE_NO_FIM = re.compile(r"[\(\[][^()\[\]]*\.(com|net|org|info|ru)[^()\[\]]*[\)\]]\s*$", re.I)
+
+
+def _limpar_titulo_epub(bruto: str) -> str:
+    """Tira o lixo que epub reempacotado carrega no titulo.
+
+    O Challenger Sale chegou como
+    `The Challenger Sale: ...   \\( PDFDrive.com \\).epub` -- quem gerou o arquivo
+    pos o nome do arquivo como titulo. Sem isso o lixo vai para o frontmatter,
+    para o INDEX.md e para toda citacao.
+    """
+    t = bruto.replace("\\(", "(").replace("\\)", ")")
+    t = _EXT_EBOOK.sub("", t.strip())
+    t = _SITE_NO_FIM.sub("", t).strip()
+    t = _EXT_EBOOK.sub("", t).strip()
+    return re.sub(r"\s{2,}", " ", t).strip(" -–—_")
+
+
+def _opf_do_epub(z) -> str:
+    """Caminho do OPF, lido do container.xml em vez de adivinhado."""
+    try:
+        raiz = ElementTree.fromstring(z.read("META-INF/container.xml"))
+    except (KeyError, ElementTree.ParseError):
+        raiz = None
+    if raiz is not None:
+        for el in raiz.iter():
+            if _sem_ns(el.tag) == "rootfile" and el.get("full-path"):
+                return el.get("full-path")
+    # epub torto: procura qualquer .opf no zip
+    for nome in z.namelist():
+        if nome.lower().endswith(".opf"):
+            return nome
+    raise ValueError("epub sem OPF: nao da para saber a ordem de leitura")
+
+
+def extrair_epub(caminho: Path) -> Documento:
+    """EPUB -> uma `Pagina` por documento do spine.
+
+    Uma pagina por documento (e nao um bloco unico, como o `.docx` faz) porque
+    o spine ja e a ordem de leitura do livro: assim `fatiar.py` corta em
+    fronteira de capitulo de verdade e a citacao aponta para um lugar real. O
+    numero da "pagina" e a posicao no spine, nao pagina de papel -- o epub nao
+    tem uma.
+    """
+    with zipfile.ZipFile(caminho) as z:
+        opf_caminho = _opf_do_epub(z)
+        opf = ElementTree.fromstring(z.read(opf_caminho))
+        pasta = PurePosixPath(opf_caminho).parent
+
+        titulo = autor = ""
+        manifesto: dict[str, str] = {}
+        ordem: list[str] = []
+        for el in opf.iter():
+            nome = _sem_ns(el.tag)
+            if nome == "title" and not titulo:
+                titulo = (el.text or "").strip()
+            elif nome == "creator" and not autor:
+                autor = (el.text or "").strip()
+            elif nome == "item" and el.get("id") and el.get("href"):
+                manifesto[el.get("id")] = el.get("href")
+            elif nome == "itemref" and el.get("idref"):
+                ordem.append(el.get("idref"))
+
+        nomes_no_zip = set(z.namelist())
+        paginas: list[Pagina] = []
+        for idref in ordem:
+            href = manifesto.get(idref)
+            if not href:
+                continue
+            alvo = str(pasta / unquote(href.split("#")[0])).lstrip("./")
+            if alvo not in nomes_no_zip:
+                continue
+            p = _HtmlParaTexto()
+            try:
+                p.feed(z.read(alvo).decode("utf-8", errors="replace"))
+            except Exception:
+                continue
+            md = p.texto()
+            # `if not md` nao basta: documento de capa ou pagina em branco sai
+            # como "##" (o marcador do titulo vazio), que e verdadeiro e viraria
+            # uma pagina sem uma palavra dentro
+            if not md.replace("#", "").strip():
+                continue
+            paginas.append(Pagina(len(paginas) + 1, md, len(md.split()), "epub"))
+
+    if not paginas:
+        raise ValueError("epub sem texto legivel no spine")
+    return Documento(titulo=_limpar_titulo_epub(titulo), autor=autor,
+                     paginas=paginas, extrator="epub")
+
+
+EXTENSOES = {".pdf", ".docx", ".epub", ".txt", ".md", ".markdown"}
 
 
 def extrair(caminho: Path, usar_ocr: bool = True, progresso=None) -> Documento:
@@ -447,6 +632,8 @@ def extrair(caminho: Path, usar_ocr: bool = True, progresso=None) -> Documento:
         return extrair_pdf(caminho, usar_ocr=usar_ocr, progresso=progresso)
     if ext == ".docx":
         return extrair_docx(caminho)
+    if ext == ".epub":
+        return extrair_epub(caminho)
     if ext in {".txt", ".md", ".markdown"}:
         return extrair_texto(caminho)
     raise ValueError("extensao nao suportada: " + ext)

@@ -66,12 +66,16 @@ DOMINIOS: dict[str, tuple[str, ...]] = {
         "engenharia-software",
         "ia-llm",
         "agentes-llm",
+        "seguranca-llm",
         "dados-ml",
         "matematica",
         "busca-recuperacao",
     ),
     "pessoal": (
         "treino-endurance",
+        # entrou em 09/09/2026 com a leva de value investing (Graham, Klarman,
+        # Munger). Nao e "comercial": nada disso serve para vender site nem PDV.
+        "financas-investimentos",
     ),
 }
 

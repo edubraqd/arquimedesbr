@@ -158,9 +158,23 @@ def avaliar(titulo: str, md: str):
         return False, "pagina de venda, nao conteudo (" + ", ".join(achadas[:2]) + ")"
 
     # sumario com pontilhado ("Hierarquia e tudo . . . . . 54"): a regra por
-    # linha nao pega, porque a extracao junta tudo num paragrafo so
-    if len(re.findall(r"(?:\.\s*){4,}", corpo)) >= 12:
-        return False, "sumario (linhas de pontilhado)"
+    # linha nao pega, porque a extracao junta tudo num paragrafo so.
+    #
+    # Contar os pontilhados NAO basta, e isso custou caro: em 09/09/2026 a
+    # contagem >= 12 jogou 23 dos 34 capitulos de Security Analysis (735 pag.,
+    # 264 mil palavras) para fora da busca. O livro e cheio de tabela
+    # financeira, e o OCR transforma o pontilhado de cada linha de tabela num
+    # run de pontos -- dentro de prosa legitima sobre bonds e depreciacao.
+    #
+    # O que separa sumario de conteudo e a FRACAO do texto que os pontos comem,
+    # nao quantos existem. Medido nos 27 capitulos que a regra antiga pegou:
+    # sumario de verdade fica em 15,8% a 48,7%; capitulo de conteudo com tabela
+    # nao passa de 5,5%. O corte em 10% cai no meio desse vao.
+    pontilhados = re.findall(r"(?:\.\s*){4,}", corpo)
+    if len(pontilhados) >= 12 and corpo:
+        fatia = sum(len(p) for p in pontilhados) / len(corpo)
+        if fatia >= 0.10:
+            return False, f"sumario (pontilhado ocupa {fatia:.0%} do texto)"
 
     # indice remissivo e sumario disfarcados: muita linha curta terminando em numero
     linhas = [ln.strip() for ln in corpo.splitlines() if ln.strip()]

@@ -508,7 +508,12 @@ def main() -> int:
                     "status": "falha", "erro": f"{e.__class__.__name__}: {e}",
                     "quando": datetime.now().isoformat(timespec="seconds"),
                 }
-                mover(caminho, raiz / "falhas")
+                try:
+                    mover(caminho, raiz / "falhas")
+                except OSError as mv:
+                    # o arquivo pode ainda estar preso (Windows). Perder o
+                    # move nao pode custar os outros 15 PDFs da fila.
+                    print(f"  aviso: nao consegui mover para falhas/: {mv}")
         placar[r] = placar.get(r, 0) + 1
         if not args.seco:
             catalogar.salvar_manifesto(manifesto_path, manifesto)

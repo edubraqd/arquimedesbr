@@ -112,6 +112,55 @@ def bonus_por_passagem(raiz: Path, consulta: str, passagens: list,
     )
 
 
+def prever_por_voto(passagens, pontos, k: int = 3, topo: int = 200,
+                    rrf: int = 10) -> list[str]:
+    """Categoria pelas passagens que a busca ja trouxe, em vez do centroide.
+
+    O centroide compara a pergunta com a **media** de uma categoria, e a media
+    apaga o que distingue categoria vizinha: medido em 07/09, ele manda "carta de
+    vendas" para `marketing` em vez de `copy-persuasao`, e "quando usar RAG" para
+    `dados-ml` em vez de `ia-llm`. Aqui nada e promediado — as passagens mais
+    parecidas votam na propria categoria, e evidencia fraca espalhada soma.
+
+    Medido contra o gabarito de 53, categoria certa entre as previstas:
+
+    | metodo         | top-1 | top-3 |
+    |----------------|-------|-------|
+    | centroide      |  52%  |  84%  |
+    | voto (este)    |  62%  |  90%  |
+
+    Peso por rank reciproco, nao por similaridade crua: a similaridade do MiniLM
+    vive num intervalo estreito, entao somar valor bruto elegeria sempre a
+    categoria com mais passagens no indice.
+
+    Dar um voto por documento em vez de um por passagem foi testado e **piora**
+    (62% -> 41%): varias passagens do mesmo livro casando e sinal de que o livro
+    e o certo, nao vies de tamanho.
+
+    **E mesmo assim nao serve para recortar a busca.** Medido ponta a ponta com
+    reranker: 29/53 sem categoria, 29/53 filtrando pelo voto, 29/53 usando o voto
+    como bonus. Zero. O motivo e estrutural, nao de ajuste: o voto sai do *mesmo
+    ranking* que produz a resposta, entao a categoria so ganha a votacao quando o
+    documento certo ja estava bem colocado. Filtrar por ela nao acrescenta
+    informacao — e circular.
+
+    O ganho do `--categoria` (29 -> 44 no teto) vem de informacao que **nao esta
+    no indice**: saber do que a pergunta trata. Quem tem isso e quem pergunta.
+    Agente escolhendo a categoria so de ler a pergunta acerta 92% e leva a busca
+    a 41/53 — ver `comparar_preditores.py` e `categorias_agente.json`.
+
+    Fica aqui como resultado negativo documentado, para ninguem tentar de novo.
+    """
+    import numpy as _np
+    from collections import defaultdict as _dd
+
+    ordem = _np.argsort(-pontos)[:topo]
+    placar = _dd(float)
+    for posicao, i in enumerate(ordem):
+        placar[passagens[i].get("categoria", "geral")] += 1.0 / (rrf + posicao)
+    return [c for c, _ in sorted(placar.items(), key=lambda kv: -kv[1])][:k]
+
+
 # --------------------------------------------------------------- medicao
 
 
