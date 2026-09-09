@@ -67,6 +67,8 @@ DOMINIOS: dict[str, tuple[str, ...]] = {
         "ia-llm",
         "agentes-llm",
         "seguranca-llm",
+        # entrou em 09/09/2026 com Gray Hat Hacking e Gray Hat Python
+        "seguranca-ofensiva",
         "dados-ml",
         "matematica",
         "busca-recuperacao",

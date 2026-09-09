@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from buscar import _frontmatter, tokenizar  # noqa: E402
+from buscar import _frontmatter, ler_capitulo, tokenizar  # noqa: E402
 
 from raiz import RAIZ_PADRAO  # noqa: E402
 PERCENTIL_ARESTA = 0.90   # so a cauda de cima do cosseno vira ligacao
@@ -30,7 +30,9 @@ MIN_OCORRENCIAS = 4       # termo raro demais nao vira conceito
 
 
 def _termos_do_arquivo(caminho: Path) -> list:
-    texto = caminho.read_text(encoding="utf-8", errors="replace")
+    texto = ler_capitulo(caminho)
+    if texto is None:
+        return ""
     if texto.startswith("---"):
         fim = texto.find("\n---", 3)
         if fim != -1:
@@ -57,7 +59,7 @@ def coletar(raiz: Path) -> dict:
              "tf": Counter(), "capitulos": 0, "n": 0},
         )
         if d["capitulos"] == 0:
-            meta = _frontmatter(caminho.read_text(encoding="utf-8", errors="replace")[:1200])
+            meta = _frontmatter((ler_capitulo(caminho) or "")[:1200])
             d["titulo"] = meta.get("titulo", pasta)
         termos = _termos_do_arquivo(caminho)
         d["tf"].update(termos)

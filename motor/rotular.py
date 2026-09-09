@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import catalogar  # noqa: E402
 import qualidade  # noqa: E402
-from buscar import _frontmatter, tokenizar  # noqa: E402
+from buscar import _frontmatter, ler_capitulo, tokenizar  # noqa: E402
 from semantico import _corpo  # noqa: E402
 
 from raiz import RAIZ_PADRAO  # noqa: E402
@@ -48,7 +48,9 @@ def carregar(raiz: Path):
     for p in sorted((raiz / "markdown").rglob("*.md")):
         if p.name == "INDEX.md":
             continue
-        bruto = p.read_text(encoding="utf-8", errors="replace")
+        bruto = ler_capitulo(p)
+        if bruto is None:
+            continue
         campos = _frontmatter(bruto)
         if campos.get("util") == "nao":
             continue

@@ -42,6 +42,32 @@ def tokenizar(texto: str) -> list:
     return [t for t in _TOKEN.findall(texto) if t not in _PARADAS]
 
 
+_ilegiveis_avisados: set = set()
+
+
+def ler_capitulo(caminho) -> str | None:
+    """Le um capitulo. Devolve None -- e avisa uma vez -- se o disco recusar.
+
+    Existe por um caso real de 09/09/2026: o antivirus poe em quarentena o
+    capitulo 16 do Gray Hat Hacking ("Understanding and Detecting Content-Type
+    Attacks") porque o TEXTO do livro casa com a assinatura Exploit:Win32/
+    Pdfjsc.Q. O arquivo continua no disco, com tamanho, e qualquer leitura
+    devolve OSError 22. Um capitulo assim nao pode custar a varredura inteira --
+    foi o que derrubou `semantico.py indexar` no meio da base.
+
+    `errors="replace"` ja cobria texto malformado; faltava o disco dizer nao.
+    """
+    try:
+        return caminho.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        chave = str(caminho)
+        if chave not in _ilegiveis_avisados:
+            _ilegiveis_avisados.add(chave)
+            print(f"  aviso: capitulo ilegivel, pulado ({e.__class__.__name__} "
+                  f"{getattr(e, 'errno', '?')}): {caminho}")
+        return None
+
+
 def _frontmatter(texto: str) -> dict:
     if not texto.startswith("---"):
         return {}
@@ -63,7 +89,9 @@ def construir_indice(raiz: Path) -> dict:
     for caminho in sorted(raiz_md.rglob("*.md")):
         if caminho.name == "INDEX.md":
             continue
-        texto = caminho.read_text(encoding="utf-8", errors="replace")
+        texto = ler_capitulo(caminho)
+        if texto is None:
+            continue
         meta = _frontmatter(texto)
         if meta.get("util") == "nao":
             continue        # copyright, sumario, indice remissivo, pagina de venda

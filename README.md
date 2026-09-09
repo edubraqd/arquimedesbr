@@ -145,7 +145,7 @@ Without Tesseract everything still works; a scanned PDF simply lands in `falhas/
 python -m unittest discover -s motor -p "test_*.py"
 ```
 
-81 tests. They touch neither disk nor network.
+85 tests. They touch neither disk nor network.
 
 ---
 
@@ -347,7 +347,7 @@ It works with any agent that reads a system prompt, not only Claude Code. The fi
 
 Default categories live in `motor/catalogar.py` (`ROTULOS`), and reflect one person's shelf:
 
-`vendas` · `marketing` · `copy-persuasao` · `posicionamento-negocio` · `ux-conversao` · `design-arte` · `engenharia-software` · `frontend` · `python` · `rust` · `ia-llm` · `agentes-llm` · `dados-ml` · `ciencia-cognitiva` · `financas-investimentos` · `treino-endurance` · `matematica` · `busca-recuperacao` · `mercado-setorial` · `geral`
+`vendas` · `marketing` · `copy-persuasao` · `posicionamento-negocio` · `ux-conversao` · `design-arte` · `engenharia-software` · `frontend` · `python` · `rust` · `ia-llm` · `agentes-llm` · `dados-ml` · `ciencia-cognitiva` · `financas-investimentos` · `seguranca-llm` · `seguranca-ofensiva` · `treino-endurance` · `matematica` · `busca-recuperacao` · `mercado-setorial` · `geral`
 
 Change them to match your own. Each entry is a label plus the keywords that select it; the filename weighs more than the body.
 

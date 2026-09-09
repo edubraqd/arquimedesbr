@@ -314,6 +314,56 @@ class TravaEEscritaDoIndice(unittest.TestCase):
         self.assertEqual(list(self.raiz.glob("*.parcial*")), [])
 
 
+class CapituloIlegivel(unittest.TestCase):
+    """Um capitulo que o disco recusa nao pode custar a varredura inteira.
+
+    Caso real de 09/09/2026: o antivirus poe em quarentena o capitulo 16 do
+    Gray Hat Hacking porque o TEXTO do livro casa com Exploit:Win32/Pdfjsc.Q.
+    O arquivo continua no disco, com tamanho, e toda leitura devolve OSError 22
+    -- o que derrubou `semantico.py indexar` no meio da base.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        buscar._ilegiveis_avisados.clear()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_capitulo_normal_e_lido(self):
+        f = self.tmp / "01-cap.md"
+        f.write_text("conteudo", encoding="utf-8")
+        self.assertEqual(buscar.ler_capitulo(f), "conteudo")
+
+    def test_oserror_vira_none_em_vez_de_explodir(self):
+        class Recusa:
+            def read_text(self, **kwargs):
+                raise OSError(22, "Invalid argument")
+
+            def __str__(self):
+                return "quarentenado.md"
+
+        self.assertIsNone(buscar.ler_capitulo(Recusa()))
+
+    def test_avisa_uma_vez_so_por_arquivo(self):
+        class Recusa:
+            def read_text(self, **kwargs):
+                raise OSError(22, "Invalid argument")
+
+            def __str__(self):
+                return "mesmo.md"
+
+        buscar.ler_capitulo(Recusa())
+        buscar.ler_capitulo(Recusa())
+        self.assertEqual(len(buscar._ilegiveis_avisados), 1)
+
+    def test_texto_malformado_continua_passando(self):
+        # errors="replace" ja cobria isto; a mudanca nao pode ter quebrado
+        f = self.tmp / "02-cap.md"
+        f.write_bytes(b"valido \xff\xfe invalido")
+        self.assertIn("valido", buscar.ler_capitulo(f))
+
+
 class TipoDeDocumento(unittest.TestCase):
     def test_tese_precisa_de_duas_marcas(self):
         uma = "o orientador: sugeriu ler o livro sobre vendas"

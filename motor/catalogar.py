@@ -42,6 +42,9 @@ CATEGORIAS = {
         ["marketing de conteudo", "content marketing", "biblia do marketing",
          "inbound", "branding", "midia social", "social media", "seo",
          "audiencia", "funil de marketing", "campanha", "neuromarketing",
+         "canal de aquisicao", "acquisition channel", "bullseye framework",
+         "traction", "viral marketing", "search engine marketing", "afiliado",
+         "growth", "aquisicao de clientes",
          "neurovendas", "publicidade", "anuncio", "engajamento", "instagram", "tiktok", "influenciador",
          "rede social", "midia paga"],
     ),
@@ -49,7 +52,9 @@ CATEGORIAS = {
         "UX, usabilidade e conversao",
         ["usability", "usabilidade", "dont make me think", "don't make me think",
          "conversion rate", "cro", "wireframe", "a/b test", "landing page",
-         "making websites win", "heatmap", "funnel", "funil"],
+         "making websites win", "heatmap", "funnel", "funil",
+         "gamification", "gamificacao", "gameful", "game mechanics",
+         "leaderboard", "badges", "engagement loop", "player type"],
     ),
     "engenharia-software": (
         "Engenharia de software",
@@ -102,6 +107,22 @@ CATEGORIAS = {
          "trajectory", "scaffold", "persistent memory", "agent memory",
          "terminal agent", "plugin marketplace", "self-improving agent",
          "context engineering", "tool response", "agente autonomo"],
+    ),
+    "seguranca-ofensiva": (
+        "Seguranca ofensiva e engenharia reversa",
+        # separado de seguranca-llm: aquela categoria carrega termos genericos
+        # ("seguranca", "vulnerability", "malicious") que puxariam livro de
+        # exploit para dentro dela e furariam a estreiteza que a faz render.
+        # Aqui so entra o que nao existe fora de seguranca de binario e rede.
+        ["buffer overflow", "shellcode", "fuzzing", "fuzzer", "engenharia reversa",
+         "reverse engineering", "exploit development", "desenvolvimento de exploit",
+         "penetration testing", "teste de invasao", "pentest", "metasploit",
+         "disassembly", "disassembler", "rootkit", "gray hat", "grey hat",
+         "ethical hacking", "hacking com python", "privilege escalation",
+         "escalonamento de privilegio", "heap spray", "ida pro", "nmap",
+         "wireshark", "packet sniffer", "sql injection", "cross-site scripting",
+         "hacking with python", "python hacking", "ethical hacker", "kali linux",
+         "brute force", "keylogger", "port scanner"],
     ),
     "seguranca-llm": (
         "Seguranca de LLM e agentes",

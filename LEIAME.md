@@ -146,7 +146,7 @@ Sem Tesseract tudo continua funcionando; o PDF escaneado apenas cai em `falhas/`
 python -m unittest discover -s motor -p "test_*.py"
 ```
 
-81 testes. Não tocam disco nem rede.
+85 testes. Não tocam disco nem rede.
 
 ---
 
@@ -350,7 +350,7 @@ Funciona com qualquer agente que leia um prompt de sistema, não só o Claude Co
 
 As categorias padrão ficam em `motor/catalogar.py` (`ROTULOS`) e refletem a estante de uma pessoa:
 
-`vendas` · `marketing` · `copy-persuasao` · `posicionamento-negocio` · `ux-conversao` · `design-arte` · `engenharia-software` · `frontend` · `python` · `rust` · `ia-llm` · `agentes-llm` · `dados-ml` · `ciencia-cognitiva` · `financas-investimentos` · `treino-endurance` · `matematica` · `busca-recuperacao` · `mercado-setorial` · `geral`
+`vendas` · `marketing` · `copy-persuasao` · `posicionamento-negocio` · `ux-conversao` · `design-arte` · `engenharia-software` · `frontend` · `python` · `rust` · `ia-llm` · `agentes-llm` · `dados-ml` · `ciencia-cognitiva` · `financas-investimentos` · `seguranca-llm` · `seguranca-ofensiva` · `treino-endurance` · `matematica` · `busca-recuperacao` · `mercado-setorial` · `geral`
 
 Troque pelas suas. Cada entrada é um rótulo mais as palavras-chave que o selecionam; o nome do arquivo pesa mais que o corpo.
 

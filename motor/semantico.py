@@ -29,7 +29,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from buscar import _frontmatter  # noqa: E402
+from buscar import _frontmatter, ler_capitulo  # noqa: E402
 
 import dominio as dom
 
@@ -198,7 +198,9 @@ def indexar(raiz: Path, refazer: bool = False) -> dict:
     atuais, corpos, campos_por_arq, metas = {}, {}, {}, {}
     for p in arquivos:
         rel = str(p.relative_to(raiz)).replace("\\", "/")
-        bruto = p.read_text(encoding="utf-8", errors="replace")
+        bruto = ler_capitulo(p)
+        if bruto is None:
+            continue
         corpo = _corpo(bruto)
         campos = _frontmatter(bruto)
         atuais[rel] = hashlib.sha1(corpo.encode("utf-8")).hexdigest()[:16]

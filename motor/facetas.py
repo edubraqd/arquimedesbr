@@ -29,7 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import catalogar
-from buscar import _frontmatter
+from buscar import _frontmatter, ler_capitulo
 from semantico import _corpo
 
 from raiz import RAIZ_PADRAO  # noqa: E402
@@ -77,7 +77,9 @@ def _amostra_do_documento(pasta: Path, limite: int = 60000) -> str:
     for md in sorted(pasta.glob("*.md")):
         if md.name == "INDEX.md":
             continue
-        bruto = md.read_text(encoding="utf-8", errors="replace")
+        bruto = ler_capitulo(md)
+        if bruto is None:
+            continue
         if _frontmatter(bruto).get("util") == "nao":
             continue
         corpo = _corpo(bruto)
