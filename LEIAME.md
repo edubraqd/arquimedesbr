@@ -146,7 +146,7 @@ Sem Tesseract tudo continua funcionando; o PDF escaneado apenas cai em `falhas/`
 python -m unittest discover -s motor -p "test_*.py"
 ```
 
-90 testes. Não tocam disco nem rede.
+96 testes. Não tocam disco nem rede.
 
 ---
 
@@ -326,6 +326,37 @@ Essa regra jogou fora 23 dos 34 capítulos de um *Security Analysis* escaneado d
 Medido nos 27 capítulos em que a regra já tinha disparado: sumário de verdade gasta **15,8% a 48,7%** dos caracteres em pontilhado; capítulo de conteúdo com tabela não passa de **5,5%**. O corte agora é essa fração, não a contagem.
 
 A lição geral, que custou um dia: **contagem absoluta é limiar disfarçado sobre o tamanho do documento.** Toda regra do tipo "mais de N ocorrências" dispara em documento longo e passa batido em documento curto. Transforme em proporção e meça onde as duas populações de fato se separam.
+
+
+## Onde a busca erra, e contra quem
+
+O `avaliar_dominio.py` diz **quanto** acerta. O `diagnosticar.py` diz **o que impede** de acertar — que é a pergunta que aponta o conserto.
+
+```bash
+python diagnosticar.py              # semântico puro
+python diagnosticar.py --categoria  # com o recorte do alvo
+python diagnosticar.py --n 10       # detalha 10 erros, nomeando quem venceu
+```
+
+Medido em 09/09/2026, 178 documentos, 53 perguntas:
+
+| Família de erro | sem recorte | com `--categoria` |
+|---|---|---|
+| `alvo-invisivel` (alvo fora do top-50) | **0** | **0** |
+| `distrator-de-outra-categoria` | 14 | 2 |
+| `distrator-vizinho` (mesma categoria do alvo) | 4 | 8 |
+
+**Zero alvo invisível muda a estratégia.** O documento certo está sempre entre os 50 primeiros: não falta recuperação, falta ranqueamento. Isso descarta, antes de gastar um dia em qualquer uma, chunk maior, mais candidatos e troca do modelo de embedding — as três atacam recuperação. E nomeia a causa real: uns poucos livros genéricos vencem perguntas de vendas, posicionamento e copy indistintamente.
+
+**Régua de ruído: com 53 perguntas, ±3 acertos não significa nada.** Mudança que não passa disso não é mudança.
+
+### Duas ideias que esse diagnóstico sugeriu, e as duas falharam
+
+Ficam registradas porque as duas pareciam certas na entrada.
+
+**Contexto na passagem** (`semantico.py indexar --contexto titulo`, que continua no código para o resultado seguir reproduzível). Um trecho de 60 palavras perde a identidade do livro, então prefixe título e capítulo antes de embutir — de graça, já que o frontmatter existe. Resultado: 35 → 29/53 com `--categoria`, MRR 0,768 → 0,708. Ele faz exatamente metade do que se esperava: o distrator de outra categoria cai de 2 para 0, porque o título ancora o livro. Só que, dentro da categoria, todo trecho passa a dividir um prefixo da mesma vizinhança semântica, e o que os separava se dilui. Como o fluxo recomendado já usa `--categoria`, a metade que ajuda é redundante e a metade que atrapalha é o que sobra.
+
+**Correção de hubness** (CSLS, sem reindexar). Livro que é vizinho de tudo é a assinatura de hubness em alta dimensão, e a correção clássica desconta de cada trecho sua similaridade média com uma amostra do corpus. Com a semente 42 deu 18 → 24/53 e ia ser adotada. Com as sementes 7, 1234 e 99 deu 18, 17 e 17, e o MRR caiu de 0,514 para ~0,477. O ganho era da amostra, não do método. **Varra a semente antes de acreditar num resultado de recuperação.**
 
 
 ---

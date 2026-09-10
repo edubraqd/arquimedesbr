@@ -164,6 +164,32 @@ def _meta_da_passagem(campos: dict, caminho: Path) -> dict:
     }
 
 
+# Contexto na passagem ("contextual retrieval"). A passagem tem 60 palavras e
+# perde a identidade do livro: um trecho sobre "the gap" nao diz que veio do Gap
+# Selling. Prefixar titulo e capitulo devolve isso ao vetor, de graca -- o
+# frontmatter ja esta calculado. Nao muda o que a busca ENTREGA (a janela sai do
+# arquivo), so o que ela COMPARA.
+#
+# Modos: "nenhum" | "titulo" | "titulo+termos". O modo entra no meta do indice,
+# entao trocar de modo obriga a reconstrucao -- misturar arms mediria ruido.
+CONTEXTO_PADRAO = "nenhum"
+_LIMITE_PREFIXO = 160
+
+
+def prefixo_de_contexto(campos: dict, modo: str) -> str:
+    if modo == "nenhum":
+        return ""
+    partes = [campos.get("titulo", ""), campos.get("capitulo", "")]
+    if modo == "titulo+termos":
+        partes.append(campos.get("termos", ""))
+    texto = ". ".join(p.strip() for p in partes if p and p.strip())
+    return texto[:_LIMITE_PREFIXO]
+
+
+def _texto_para_embutir(prefixo: str, passagem: str) -> str:
+    return f"{prefixo}. {passagem}" if prefixo else passagem
+
+
 def _assinatura_meta(campos: dict) -> str:
     """Hash so dos campos que a busca exibe ou filtra, mais `util`."""
     bruto = "\x00".join(str(campos.get(c, "")) for c in CAMPOS_META)
@@ -171,7 +197,8 @@ def _assinatura_meta(campos: dict) -> str:
     return hashlib.sha1(bruto.encode("utf-8")).hexdigest()[:12]
 
 
-def indexar(raiz: Path, refazer: bool = False) -> dict:
+def indexar(raiz: Path, refazer: bool = False,
+            contexto: str = CONTEXTO_PADRAO) -> dict:
     meta_path, vet_path = raiz / ARQ_META, raiz / ARQ_VETORES
     antigo = {}
     vetores_antigos = None
@@ -186,6 +213,13 @@ def indexar(raiz: Path, refazer: bool = False) -> dict:
                 f"indice ilegivel ({e.__class__.__name__}: {e}).\n"
                 f"    Reconstrua do zero: python semantico.py indexar --refazer"
             ) from e
+
+    # trocar o modo de contexto muda o vetor de TODA passagem: reaproveitar
+    # embedding de outro modo misturaria dois experimentos no mesmo indice
+    if antigo and antigo.get("contexto", "nenhum") != contexto:
+        print(f"contexto mudou ({antigo.get('contexto', 'nenhum')} -> {contexto}):"
+              f" reconstruindo tudo")
+        antigo, vetores_antigos = {}, None
 
     hashes_antigos = antigo.get("hashes", {})
     passagens_antigas = antigo.get("passagens", [])
@@ -256,10 +290,11 @@ def indexar(raiz: Path, refazer: bool = False) -> dict:
         campos = _frontmatter(bruto)
         if campos.get("util") == "nao":
             continue    # nao gasta embedding em copyright, sumario ou indice
+        prefixo = prefixo_de_contexto(campos, contexto)
         for ini, n, texto in _passagens(corpo):
             novas.append({"caminho": caminho, "ini": ini, "n": n,
                           **_meta_da_passagem(campos, p)})
-            textos.append(texto)
+            textos.append(_texto_para_embutir(prefixo, texto))
 
     if textos:
         print(f"{len(textos)} passagens para embutir")
@@ -281,8 +316,8 @@ def indexar(raiz: Path, refazer: bool = False) -> dict:
     todos = np.vstack([vetores_mantidos, novos_vetores]) if len(mantidas) else novos_vetores
     passagens = mantidas + novas
 
-    meta = {"modelo": MODELO, "hashes": atuais, "metas": metas,
-            "passagens": passagens}
+    meta = {"modelo": MODELO, "contexto": contexto, "hashes": atuais,
+            "metas": metas, "passagens": passagens}
     # vetores primeiro: se a troca do meta falhar, o .npz novo ainda casa com o
     # meta velho pelos hashes, e a rodada seguinte reconstroi so a diferenca
     escrever_atomico(vet_path, lambda p: np.savez_compressed(p, v=todos))
@@ -478,6 +513,9 @@ def main() -> int:
     ap.add_argument("--rerank", action="store_true",
                     help="reordena os melhores com cross-encoder (+6s, bem melhor)")
     ap.add_argument("--topo", type=int, default=50)
+    ap.add_argument("--contexto", default=CONTEXTO_PADRAO,
+                    choices=("nenhum", "titulo", "titulo+termos"),
+                    help="prefixo de contexto embutido em cada passagem")
     ap.add_argument("--refazer", action="store_true")
     args = ap.parse_args()
 
@@ -491,7 +529,8 @@ def main() -> int:
     if args.consulta[0] == "indexar":
         try:
             with travar(args.raiz):
-                indexar(args.raiz, refazer=args.refazer)
+                indexar(args.raiz, refazer=args.refazer,
+                        contexto=args.contexto)
         except IndiceEmUso as e:
             print(f"erro: {e}")
             return 1

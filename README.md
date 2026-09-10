@@ -145,7 +145,7 @@ Without Tesseract everything still works; a scanned PDF simply lands in `falhas/
 python -m unittest discover -s motor -p "test_*.py"
 ```
 
-90 tests. They touch neither disk nor network.
+96 tests. They touch neither disk nor network.
 
 ---
 
@@ -323,6 +323,37 @@ That rule threw away 23 of the 34 chapters of a 735-page scanned copy of *Securi
 Measured across the 27 chapters the rule had ever fired on: a genuine table of contents spends **15.8%–48.7%** of its characters on dotted runs; a content chapter with tables never passes **5.5%**. The threshold is now that fraction, not the count.
 
 The general lesson, which cost a day: **an absolute count is a threshold on document length in disguise.** Any rule of the form "more than N occurrences" will fire on long documents and miss short ones. Make it a ratio and measure where the two populations actually separate.
+
+
+## Where the search fails, and to what
+
+`avaliar_dominio.py` says **how much** it gets right. `diagnosticar.py` says **what stops it** — which is the question that tells you what to fix.
+
+```bash
+python diagnosticar.py              # semantic only
+python diagnosticar.py --categoria  # with the target's filter
+python diagnosticar.py --n 10       # detail 10 failures, naming what beat the target
+```
+
+Measured 2026-09-09 over 178 documents and 53 questions:
+
+| Failure family | no filter | with `--categoria` |
+|---|---|---|
+| `alvo-invisivel` (target outside top-50) | **0** | **0** |
+| `distrator-de-outra-categoria` (winner from another category) | 14 | 2 |
+| `distrator-vizinho` (winner from the target's own category) | 4 | 8 |
+
+**Zero invisible targets changes the strategy.** The right document is always among the first 50: retrieval is not the bottleneck, ranking is. That rules out, before you spend a day on any of them, bigger chunks, more candidates, and swapping the embedding model — all three attack retrieval. And it names the real cause: a handful of generic books win questions about sales, positioning and copy indiscriminately.
+
+**Noise floor: with 53 questions, ±3 hits means nothing.** A change that does not clear that is not a change.
+
+### Two things this diagnosis suggested, both of which failed
+
+Kept because each one looked right on the way in.
+
+**Contextual prefix** (`semantico.py indexar --contexto titulo`, still shipped so the result stays reproducible). A 60-word passage loses its book's identity, so prefix the title and chapter before embedding — free, since the frontmatter is already computed. Result: 35 → 29/53 with `--categoria`, MRR 0.768 → 0.708. It does exactly half of what was hoped: cross-category distractors drop from 2 to 0, because the title anchors the book. But within a category every passage now shares a prefix from the same semantic neighbourhood, and what distinguished them dilutes. Since the recommended workflow already passes `--categoria`, the half that helps is redundant and the half that hurts is what you get.
+
+**Hubness correction** (CSLS, no reindex needed). A book that is a neighbour of everything is the signature of hubness in high-dimensional space; the classic fix subtracts each passage's mean similarity to a corpus sample. With random seed 42 it scored 18 → 24/53 and was about to be adopted. With seeds 7, 1234 and 99 it scored 18, 17 and 17, and MRR fell from 0.514 to about 0.477. The gain belonged to the sample, not to the method. **Sweep the seed before believing a retrieval result.**
 
 
 ---

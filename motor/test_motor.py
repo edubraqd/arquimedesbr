@@ -402,6 +402,46 @@ class TermoCurtoExigeFronteira(unittest.TestCase):
             "rust")
 
 
+class ContextoNaPassagem(unittest.TestCase):
+    """Prefixo de contexto muda o que a busca COMPARA, nunca o que ENTREGA.
+
+    A passagem tem 60 palavras e perde a identidade do livro. O prefixo
+    devolve titulo e capitulo ao vetor usando frontmatter ja calculado. A
+    janela entregue continua saindo do arquivo, entao o texto lido pelo
+    usuario nao carrega prefixo nenhum.
+    """
+
+    CAMPOS = {"titulo": "Gap Selling", "capitulo": "CHAPTER 13",
+              "termos": "problem identification, current state"}
+
+    def test_modo_nenhum_nao_toca_na_passagem(self):
+        self.assertEqual(semantico.prefixo_de_contexto(self.CAMPOS, "nenhum"), "")
+        self.assertEqual(semantico._texto_para_embutir("", "o trecho"), "o trecho")
+
+    def test_modo_titulo_junta_titulo_e_capitulo(self):
+        p = semantico.prefixo_de_contexto(self.CAMPOS, "titulo")
+        self.assertIn("Gap Selling", p)
+        self.assertIn("CHAPTER 13", p)
+        self.assertNotIn("current state", p)
+
+    def test_modo_com_termos_inclui_os_termos(self):
+        p = semantico.prefixo_de_contexto(self.CAMPOS, "titulo+termos")
+        self.assertIn("current state", p)
+
+    def test_prefixo_tem_teto(self):
+        gordo = {"titulo": "t" * 500, "capitulo": "c" * 500}
+        p = semantico.prefixo_de_contexto(gordo, "titulo")
+        self.assertLessEqual(len(p), semantico._LIMITE_PREFIXO)
+
+    def test_campo_faltando_nao_deixa_pontuacao_solta(self):
+        p = semantico.prefixo_de_contexto({"titulo": "Gap Selling"}, "titulo")
+        self.assertEqual(p, "Gap Selling")
+
+    def test_passagem_entra_inteira_depois_do_prefixo(self):
+        junto = semantico._texto_para_embutir("Gap Selling", "o trecho original")
+        self.assertTrue(junto.endswith("o trecho original"))
+
+
 class TipoDeDocumento(unittest.TestCase):
     def test_tese_precisa_de_duas_marcas(self):
         uma = "o orientador: sugeriu ler o livro sobre vendas"
