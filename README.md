@@ -347,13 +347,25 @@ Measured 2026-09-09 over 178 documents and 53 questions:
 
 **Noise floor: with 53 questions, ±3 hits means nothing.** A change that does not clear that is not a change.
 
-### Two things this diagnosis suggested, both of which failed
+### Three things this diagnosis suggested, all of which failed
 
 Kept because each one looked right on the way in.
 
 **Contextual prefix** (`semantico.py indexar --contexto titulo`, still shipped so the result stays reproducible). A 60-word passage loses its book's identity, so prefix the title and chapter before embedding — free, since the frontmatter is already computed. Result: 35 → 29/53 with `--categoria`, MRR 0.768 → 0.708. It does exactly half of what was hoped: cross-category distractors drop from 2 to 0, because the title anchors the book. But within a category every passage now shares a prefix from the same semantic neighbourhood, and what distinguished them dilutes. Since the recommended workflow already passes `--categoria`, the half that helps is redundant and the half that hurts is what you get.
 
+**More candidates for the reranker** (`--topo 100`, `--topo 200`). The reranker does not receive documents, it receives the top-N passages by cosine, so a target that always ranks inside the top-50 *documents* could still miss the cross-encoder if a few passages crowd the head of the list. Measured: with `--categoria`, topo 50 and topo 100 both score 42/53, and topo 200 scores **37/53** with MRR falling from 0.839 to 0.810. The target was already reaching the cross-encoder; extra candidates only raise the chance that a plausible-but-wrong passage takes the top score. The default stays at 50.
+
 **Hubness correction** (CSLS, no reindex needed). A book that is a neighbour of everything is the signature of hubness in high-dimensional space; the classic fix subtracts each passage's mean similarity to a corpus sample. With random seed 42 it scored 18 → 24/53 and was about to be adopted. With seeds 7, 1234 and 99 it scored 18, 17 and 17, and MRR fell from 0.514 to about 0.477. The gain belonged to the sample, not to the method. **Sweep the seed before believing a retrieval result.**
+
+
+### What the reranker is worth, now that the corpus doubled
+
+| Mode | 77 documents (07/09) | 178 documents (09/09) |
+|---|---|---|
+| semantic + `--categoria` | 37/53 · MRR 0.806 | 35/53 · MRR 0.768 |
+| semantic + rerank + `--categoria` | 43/53 · MRR 0.869 | **42/53 · MRR 0.839** |
+
+Every document added is also a distractor added, and accuracy fell on both rows. But **the reranker absorbs the growth**: doubling the corpus cost two hits without it and one with it. That is the strongest argument for the ~6 s per query — not the absolute score, but that it degrades more slowly as the shelf grows.
 
 
 ---

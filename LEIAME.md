@@ -350,13 +350,25 @@ Medido em 09/09/2026, 178 documentos, 53 perguntas:
 
 **Régua de ruído: com 53 perguntas, ±3 acertos não significa nada.** Mudança que não passa disso não é mudança.
 
-### Duas ideias que esse diagnóstico sugeriu, e as duas falharam
+### Três ideias que esse diagnóstico sugeriu, e as três falharam
 
 Ficam registradas porque as duas pareciam certas na entrada.
 
 **Contexto na passagem** (`semantico.py indexar --contexto titulo`, que continua no código para o resultado seguir reproduzível). Um trecho de 60 palavras perde a identidade do livro, então prefixe título e capítulo antes de embutir — de graça, já que o frontmatter existe. Resultado: 35 → 29/53 com `--categoria`, MRR 0,768 → 0,708. Ele faz exatamente metade do que se esperava: o distrator de outra categoria cai de 2 para 0, porque o título ancora o livro. Só que, dentro da categoria, todo trecho passa a dividir um prefixo da mesma vizinhança semântica, e o que os separava se dilui. Como o fluxo recomendado já usa `--categoria`, a metade que ajuda é redundante e a metade que atrapalha é o que sobra.
 
+**Mais candidatos para o reranker** (`--topo 100`, `--topo 200`). O reranker não recebe documentos, recebe as N passagens mais próximas por cosseno — então um alvo que está sempre no top-50 *de documentos* ainda poderia não chegar ao cross-encoder, se poucas passagens entupissem o topo da lista. Medido: com `--categoria`, topo 50 e topo 100 empatam em 42/53, e topo 200 cai para **37/53**, com MRR de 0,839 para 0,810. O alvo já estava chegando ao cross-encoder; candidato a mais só aumenta a chance de um trecho plausível-e-errado tirar a nota mais alta. O padrão continua 50.
+
 **Correção de hubness** (CSLS, sem reindexar). Livro que é vizinho de tudo é a assinatura de hubness em alta dimensão, e a correção clássica desconta de cada trecho sua similaridade média com uma amostra do corpus. Com a semente 42 deu 18 → 24/53 e ia ser adotada. Com as sementes 7, 1234 e 99 deu 18, 17 e 17, e o MRR caiu de 0,514 para ~0,477. O ganho era da amostra, não do método. **Varra a semente antes de acreditar num resultado de recuperação.**
+
+
+### Quanto vale o reranker, agora que o corpus dobrou
+
+| Modo | 77 documentos (07/09) | 178 documentos (09/09) |
+|---|---|---|
+| semântico + `--categoria` | 37/53 · MRR 0,806 | 35/53 · MRR 0,768 |
+| semântico + rerank + `--categoria` | 43/53 · MRR 0,869 | **42/53 · MRR 0,839** |
+
+Cada documento novo também é um distrator novo, e a precisão caiu nas duas linhas. Mas **o reranker absorve o crescimento**: dobrar o corpus custou dois acertos sem ele e um com ele. Esse é o argumento mais forte a favor dos ~6 s por consulta — não o número absoluto, e sim degradar mais devagar conforme a estante cresce.
 
 
 ---
