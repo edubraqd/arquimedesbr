@@ -108,7 +108,39 @@ a `dominio.json` at the root of the library. A category that exists in the
 library and belongs to no domain is included in **all** of them — so a new
 document never silently disappears.
 
-### 1. Semantic search with the reranker — the default
+### 1. Cheap first: cards, then open only what you need
+
+`consultar.py` is the token-lean path and should be the first call. It returns
+6 cards of ~25 words each (~280 words total) instead of the ~720 words that
+three `--passagens` results cost. Measured on the 53-question ground truth:
+**the target is among those 6 cards in 51 of 53 questions.** You do not need it
+ranked first — you need to see it, and you almost always do.
+
+```bash
+python <motor>/consultar.py "how to answer that it is too expensive" --categoria vendas
+```
+
+Then act on what you see:
+
+```bash
+python <motor>/consultar.py --sessao <id> --abrir 2        # full window, that card only
+python <motor>/consultar.py --sessao <id> --sim 2 --nao 1,3  # none of these: spin again
+```
+
+The second form moves the query with Rocchio (`alpha` 1, `beta` 0.75,
+`gamma` 0.15, from *Introduction to Information Retrieval* ch. 9, which is in
+the library). It costs no tokens and no network — the query vector is cached in
+the session, so the question is not re-embedded.
+
+**Two rounds, never three.** Measured: round 2 adds 5 hits out of 53; round 3
+adds zero. If two rounds have not found it, the library probably does not cover
+the question — say so instead of spinning.
+
+Use `semantico.py --passagens` below when you already know you want the wide
+window for several results at once. For the normal "find the right chapter"
+job, `consultar.py` costs about a fifth per candidate.
+
+### 2. Semantic search with the reranker — the wide form
 
 Best measured result. **Never open a whole book to look for something.**
 
@@ -134,7 +166,7 @@ python <motor>/avaliar_dominio.py          # ~30min, everything
 **Do not use `--hibrido`**: fusing the rankings measures worse than either one
 alone.
 
-### 2. BM25 when the target is literal
+### 3. BM25 when the target is literal
 
 Acronym, proper noun, jargon (`FTP`, `EBT`, `useEffect`, `wa.me`). Write the
 query **in both languages**: it does not change hit@1 (8/53 either way) but
@@ -146,19 +178,19 @@ the target near the top.
 python <motor>/buscar.py "objecao de preco" --tambem "price objection" --n 6 --trechos
 ```
 
-### 3. Read the document's `INDEX.md` before the chapter
+### 4. Read the document's `INDEX.md` before the chapter
 
 It has the table of contents with page numbers, word counts, and which chapters
 were marked out of search. The frontmatter gives `idioma`, `util`, `assunto` and
 `termos` — read those before opening the full chapter.
 
-### 4. Read only the chapter that was pointed at
+### 5. Read only the chapter that was pointed at
 
 Each file has frontmatter with `titulo`, `autor`, `capitulo`, `paginas`,
 `palavras`. A chapter fits in ~8k words on purpose; a whole book does not fit in
 context and should not be read.
 
-### 5. The graph, when the question is about relations
+### 6. The graph, when the question is about relations
 
 "What connects X and Y", "who else talks about this", "which book approaches this
 theme from another side".

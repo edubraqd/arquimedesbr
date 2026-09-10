@@ -15,6 +15,7 @@ from pathlib import Path
 import buscar
 import dominio
 import catalogar
+import consultar
 import extrair
 import fatiar
 import processar
@@ -440,6 +441,56 @@ class ContextoNaPassagem(unittest.TestCase):
     def test_passagem_entra_inteira_depois_do_prefixo(self):
         junto = semantico._texto_para_embutir("Gap Selling", "o trecho original")
         self.assertTrue(junto.endswith("o trecho original"))
+
+
+class Realimentacao(unittest.TestCase):
+    """Rocchio: a consulta anda na direcao do que serve e foge do que nao serve.
+
+    Constantes de Introduction to Information Retrieval, cap. 9 (p. 214-231),
+    que esta na base: alfa 1, beta 0,75, gama 0,15. O livro e explicito sobre
+    gama < beta -- realimentacao positiva vale mais que negativa.
+    """
+
+    def vetores(self):
+        # 0 e a consulta, 1 e "o que serve", 2 e "o que nao serve"
+        import numpy as np
+        return np.array([[1.0, 0.0, 0.0],
+                         [0.0, 1.0, 0.0],
+                         [0.0, 0.0, 1.0]], dtype=np.float32)
+
+    def test_sem_julgamento_a_consulta_nao_muda(self):
+        import numpy as np
+        q = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        novo = consultar.rocchio(q, self.vetores(), [], [])
+        np.testing.assert_allclose(novo, q, atol=1e-6)
+
+    def test_anda_na_direcao_do_relevante(self):
+        import numpy as np
+        q = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        novo = consultar.rocchio(q, self.vetores(), [1], [])
+        self.assertGreater(novo[1], 0.0)
+
+    def test_foge_do_nao_relevante(self):
+        import numpy as np
+        q = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        novo = consultar.rocchio(q, self.vetores(), [], [2])
+        self.assertLess(novo[2], 0.0)
+
+    def test_positivo_pesa_mais_que_negativo(self):
+        import numpy as np
+        q = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        novo = consultar.rocchio(q, self.vetores(), [1], [2])
+        self.assertGreater(novo[1], abs(novo[2]))
+
+    def test_resultado_sai_normalizado(self):
+        import numpy as np
+        q = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        novo = consultar.rocchio(q, self.vetores(), [1], [2])
+        self.assertAlmostEqual(float(np.linalg.norm(novo)), 1.0, places=5)
+
+    def test_constantes_sao_as_do_livro(self):
+        self.assertEqual((consultar.ALFA, consultar.BETA, consultar.GAMA),
+                         (1.0, 0.75, 0.15))
 
 
 class TipoDeDocumento(unittest.TestCase):

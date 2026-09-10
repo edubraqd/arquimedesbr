@@ -145,7 +145,7 @@ Without Tesseract everything still works; a scanned PDF simply lands in `falhas/
 python -m unittest discover -s motor -p "test_*.py"
 ```
 
-96 tests. They touch neither disk nor network.
+102 tests. They touch neither disk nor network.
 
 ---
 
@@ -324,6 +324,39 @@ Measured across the 27 chapters the rule had ever fired on: a genuine table of c
 
 The general lesson, which cost a day: **an absolute count is a threshold on document length in disguise.** Any rule of the form "more than N occurrences" will fire on long documents and miss short ones. Make it a ratio and measure where the two populations actually separate.
 
+
+## Consulting cheaply: cards first, then feedback
+
+`semantico.py --passagens` returns a ~420-word window per result. Good to read, expensive to decide with: the agent spends roughly 1,700 tokens only to discover that the second result was the one it wanted. `consultar.py` inverts that.
+
+```bash
+python motor/consultar.py "how to answer that it is too expensive" --categoria vendas
+python motor/consultar.py --sessao a1b2 --abrir 2
+python motor/consultar.py --sessao a1b2 --sim 2 --nao 1,3
+```
+
+| | words | per candidate |
+|---|---|---|
+| `semantico.py --passagens --n 3` | 723 | 241 |
+| `consultar.py --n 6` | 279 | **46** |
+
+Twice the candidates for 39% of the text, and **the target is among those 6 cards in 51 of 53 questions.** The agent does not need it ranked first, it needs to see it — and the wide window is fetched only for the card it picks.
+
+### The second round is Rocchio
+
+```
+q' = alpha*q + beta*mean(relevant) - gamma*mean(non-relevant)
+```
+
+`alpha` 1, `beta` 0.75, `gamma` 0.15 — from *Introduction to Information Retrieval*, ch. 9, which happens to sit in the library this engine indexes. The book is explicit about the asymmetry ("positive feedback turns out to be much more valuable than negative feedback, and so most IR systems set gamma < beta") and about the precondition: the initial query must already be close to the target.
+
+**That precondition is measured here, not assumed**: across 53 questions the right document never fell outside the top 50. This is why relevance feedback pays where contextual prefixes, hubness correction and more reranker candidates all failed — those three attacked retrieval, which was never the bottleneck.
+
+Rocchio is vector arithmetic: no network, no tokens, milliseconds. The query vector is cached in the session, so a second round does not re-embed the question.
+
+**Two rounds, never three.** Measured: round 2 lifts hit@1 from 28 to 33 of 53; round 3 adds nothing. If two rounds have not found it, the library probably does not cover the question.
+
+---
 
 ## Where the search fails, and to what
 

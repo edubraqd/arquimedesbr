@@ -146,7 +146,7 @@ Sem Tesseract tudo continua funcionando; o PDF escaneado apenas cai em `falhas/`
 python -m unittest discover -s motor -p "test_*.py"
 ```
 
-96 testes. Não tocam disco nem rede.
+102 testes. Não tocam disco nem rede.
 
 ---
 
@@ -327,6 +327,39 @@ Medido nos 27 capítulos em que a regra já tinha disparado: sumário de verdade
 
 A lição geral, que custou um dia: **contagem absoluta é limiar disfarçado sobre o tamanho do documento.** Toda regra do tipo "mais de N ocorrências" dispara em documento longo e passa batido em documento curto. Transforme em proporção e meça onde as duas populações de fato se separam.
 
+
+## Consultar barato: cartões primeiro, realimentação depois
+
+O `semantico.py --passagens` devolve uma janela de ~420 palavras por resultado. Bom para ler, caro para decidir: o agente gasta ~1.700 tokens só para descobrir que o segundo resultado era o que ele queria. O `consultar.py` inverte isso.
+
+```bash
+python motor/consultar.py "como responder que está caro" --categoria vendas
+python motor/consultar.py --sessao a1b2 --abrir 2
+python motor/consultar.py --sessao a1b2 --sim 2 --nao 1,3
+```
+
+| | palavras | por candidato |
+|---|---|---|
+| `semantico.py --passagens --n 3` | 723 | 241 |
+| `consultar.py --n 6` | 279 | **46** |
+
+Dobro de candidatos por 39% do texto, e **o alvo está entre esses 6 cartões em 51 das 53 perguntas.** O agente não precisa dele em primeiro lugar, precisa enxergá-lo — e a janela larga só é buscada para o cartão que ele escolher.
+
+### A segunda rodada é Rocchio
+
+```
+q' = alfa*q + beta*média(relevantes) - gama*média(não relevantes)
+```
+
+`alfa` 1, `beta` 0,75, `gama` 0,15 — de *Introduction to Information Retrieval*, cap. 9, que por acaso está na biblioteca que este motor indexa. O livro é explícito sobre a assimetria ("positive feedback turns out to be much more valuable than negative feedback, and so most IR systems set gama < beta") e sobre a pré-condição: a consulta inicial precisa já estar perto do alvo.
+
+**Essa pré-condição aqui é medida, não suposta**: nas 53 perguntas o documento certo nunca ficou fora do top-50. É por isso que realimentação rende onde prefixo de contexto, correção de hubness e mais candidatos para o reranker falharam — as três atacavam recuperação, que nunca foi o gargalo.
+
+Rocchio é aritmética de vetores: sem rede, sem token, milissegundos. O vetor da consulta fica em cache na sessão, então a segunda rodada não re-embute a pergunta.
+
+**Duas rodadas, nunca três.** Medido: a rodada 2 leva o hit@1 de 28 para 33 de 53; a rodada 3 não acrescenta nada. Se duas rodadas não acharam, provavelmente a base não cobre a pergunta.
+
+---
 
 ## Onde a busca erra, e contra quem
 
