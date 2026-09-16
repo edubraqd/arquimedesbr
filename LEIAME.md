@@ -380,19 +380,21 @@ Rocchio é aritmética de vetores: sem rede, sem token, milissegundos. O vetor d
 
 ### Desde 16/09/2026: BM25 fundido, dois idiomas, um cartão por documento
 
-Medido em 140 perguntas, categoria escolhida por agente lendo só a pergunta, cross-encoder nos 6 finais (`avaliar_consultar.py`). O índice estava um pouco desatualizado quando rodou, então **compare as linhas entre si, não com as outras tabelas deste arquivo**:
+Medido em 140 perguntas, categoria escolhida por agente lendo só a pergunta, cross-encoder nos 6 finais (`avaliar_consultar.py --todas --estrato`), sobre o índice refeito no mesmo dia depois de o `--revisar` separar as bibliografias: 234 documentos, 27.740 capítulos, 247.955 passagens. Uma rodada anterior, na mesma manhã e em índice desatualizado, tinha ordenado os modos do mesmo jeito; estes são os números que a substituem.
 
-| modo | hit@1 | hit@3 | hit@6 | MRR |
-|---|---|---|---|---|
-| denso, pergunta só em português (o `consultar.py` de antes) | 67 | 107 | 121 | 0,625 |
-| denso, vetor = PT + EN | 72 | 109 | **129** | 0,660 |
-| BM25 bilíngue → rerank | **79** | 112 | 126 | **0,695** |
-| RRF de denso-30 ∪ BM25-30 → rerank 6 | 74 | **114** | 127 | 0,674 |
-| RRF com PT + EN (**o padrão agora**) | 74 | 112 | **129** | 0,674 |
+| modo | hit@1 | hit@3 | hit@6 | hit@12 | MRR |
+|---|---|---|---|---|---|
+| denso, pergunta só em português (o `consultar.py` de antes) | 62 | 105 | 117 | 117 | 0,596 |
+| denso, vetor = PT + EN, sem BM25 | 70 | 111 | 130 | 130 | 0,657 |
+| **RRF de denso-30 ∪ BM25-30 → rerank 6, PT + EN (o padrão)** | 72 | **114** | **130** | 130 | 0,671 |
+| o padrão mais a rodada 2 (Rocchio) | 72 | 114 | 130 | **133** | 0,673 |
+| `semantico.py`, 50 passagens → rerank (o caminho largo) | **90** | 113 | 128 | 129 | **0,745** |
+
+Por domínio do alvo, hit@1 / hit@3 / hit@6: o padrão faz 30/48/52 nas 56 perguntas comerciais, **40/59/69 nas 74 técnicas** e 2/6/8 nas 9 pessoais; o caminho largo faz 39/46/53, 45/59/66 e 5/7/8. O que a tabela diz, em ordem de tamanho: `--tambem` vale **+10 / +9 / +13**; fundir BM25 por cima disso vale +2 / +3 / 0, dentro do ruído; a rodada 2 é a única coisa acima de 130; e no hit@6 os seis cartões ganham do caminho largo (130 contra 128) — o caminho largo só ganha o hit@1, que importa só para quem abre o primeiro cartão sem ler os outros. A rodada anterior em índice velho tinha também um modo BM25 puro → rerank que ganhava o hit@1 (79); não foi repetido.
 
 Quatro coisas mudaram no `consultar.py` por causa disso:
 
-- **`--tambem "<a pergunta em inglês>"`.** O motor soma os dois embeddings e roda o BM25 nas duas strings. É o ganho mais barato da estante — +8 em hit@6 a custo zero, porque o agente que escreve a consulta já sabe os dois idiomas e 135 desses 178 documentos são em inglês. Só pule se a estante inteira for de um idioma.
+- **`--tambem "<a pergunta em inglês>"`.** O motor soma os dois embeddings e roda o BM25 nas duas strings. É o ganho mais barato da estante — +10 em hit@1 e +13 em hit@6 a custo zero, porque o agente que escreve a consulta já sabe os dois idiomas e 173 desses 234 documentos são em inglês. Só pule se a estante inteira for de um idioma.
 - **Toda rodada funde os 30 melhores documentos por vetor com os 30 por BM25** por rank recíproco (`fundir_rrf`), e reranqueia os 6. BM25 ganhar o hit@1 num corpus de ~15 M tokens bate com o que *BM25 Wins at Scale* (arXiv 2607.26497) prevê; a fusão segura o hit@6 do lado denso.
 - **A rodada 2 nunca repete documento já mostrado.** O dedup antigo era por passagem: a consulta andava, outro capítulo do mesmo livro virava a melhor passagem dele, e um livro que você acabou de julgar voltava como novidade. Cartão visto é cartão gasto.
 - **`--mais <n>`** lista os outros capítulos do documento do cartão *n*, ranqueados pela consulta atual, numerados para poder abrir. Cobre o caso que o dedup esconderia: livro certo, capítulo errado.

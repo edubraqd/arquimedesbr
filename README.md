@@ -377,19 +377,21 @@ Rocchio is vector arithmetic: no network, no tokens, milliseconds. The query vec
 
 ### Since 2026-09-16: BM25 fused, both languages, one card per document
 
-Measured on 140 questions, category chosen by an agent reading only the question, cross-encoder on the final 6 (`avaliar_consultar.py`). The index was slightly stale when this ran, so **compare rows with each other, not with other tables in this file**:
+Measured on 140 questions, category chosen by an agent reading only the question, cross-encoder on the final 6 (`avaliar_consultar.py --todas --estrato`), on the index rebuilt the same day after `--revisar` split the bibliographies: 234 documents, 27,740 chapters, 247,955 passages. An earlier run the same morning, on a stale index, had ranked the modes the same way; these are the numbers that replace it.
 
-| mode | hit@1 | hit@3 | hit@6 | MRR |
-|---|---|---|---|---|
-| dense, query in Portuguese only (the old `consultar.py`) | 67 | 107 | 121 | 0.625 |
-| dense, vector = PT + EN | 72 | 109 | **129** | 0.660 |
-| BM25 bilingual → rerank | **79** | 112 | 126 | **0.695** |
-| RRF of dense-30 ∪ BM25-30 → rerank 6 | 74 | **114** | 127 | 0.674 |
-| RRF with PT + EN (**the default now**) | 74 | 112 | **129** | 0.674 |
+| mode | hit@1 | hit@3 | hit@6 | hit@12 | MRR |
+|---|---|---|---|---|---|
+| dense, query in Portuguese only (the old `consultar.py`) | 62 | 105 | 117 | 117 | 0.596 |
+| dense, vector = PT + EN, no BM25 | 70 | 111 | 130 | 130 | 0.657 |
+| **RRF of dense-30 ∪ BM25-30 → rerank 6, PT + EN (the default)** | 72 | **114** | **130** | 130 | 0.671 |
+| the default plus round 2 (Rocchio) | 72 | 114 | 130 | **133** | 0.673 |
+| `semantico.py`, 50 passages → rerank (the wide path) | **90** | 113 | 128 | 129 | **0.745** |
+
+By target domain, hit@1 / hit@3 / hit@6: the default does 30/48/52 on the 56 commercial questions, **40/59/69 on the 74 technical ones** and 2/6/8 on the 9 personal ones; the wide path does 39/46/53, 45/59/66 and 5/7/8. What the table says, in order of size: `--tambem` is worth **+10 / +9 / +13**; fusing BM25 on top of that is +2 / +3 / 0, inside the noise; round 2 is the only thing above 130; and at hit@6 the six cards beat the wide path (130 versus 128) — the wide path wins only hit@1, which matters only to whoever opens the first card without reading the rest. An earlier stale-index run also had a BM25-only → rerank mode that won hit@1 (79); it was not repeated.
 
 Four things changed in `consultar.py` because of it:
 
-- **`--tambem "<the question in English>"`.** The engine sums the two embeddings and runs BM25 on both strings. It is the cheapest gain on the shelf — +8 on hit@6 for zero cost, because the agent writing the query already knows both languages and 135 of these 178 documents are in English. Skip it only if your whole shelf is in one language.
+- **`--tambem "<the question in English>"`.** The engine sums the two embeddings and runs BM25 on both strings. It is the cheapest gain on the shelf — +10 on hit@1 and +13 on hit@6 for zero cost, because the agent writing the query already knows both languages and 173 of these 234 documents are in English. Skip it only if your whole shelf is in one language.
 - **Every round fuses the top-30 documents by vector with the top-30 by BM25** through reciprocal rank (`fundir_rrf`), then reranks the 6. That BM25 wins hit@1 outright on a ~15M-token corpus matches what *BM25 Wins at Scale* (arXiv 2607.26497) predicts; the fusion keeps the dense side's hit@6.
 - **Round 2 never repeats a document already shown.** The old dedup was per passage: after the query moved, another chapter of the same book became its best passage and a book you had just judged came back as news. A card seen is a card spent.
 - **`--mais <n>`** lists the other chapters of the document on card *n*, ranked by the current query, numbered so they can be opened. It covers the case the dedup would otherwise hide: the right book, wrong chapter.

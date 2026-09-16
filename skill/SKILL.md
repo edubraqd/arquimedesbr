@@ -122,11 +122,13 @@ python <motor>/consultar.py "how to answer that it is too expensive" --tambem "p
 
 **Always pass `--tambem` with the question in the other language** (English if
 you wrote it in Portuguese, and vice versa). The engine sums the two embeddings
-and runs BM25 on both strings. Measured on 140 questions it is worth +8 on hit@6
-for no cost at all: you already know both languages, and most shelves are
-mostly English. Each round then fuses the 30 best documents by vector with the
-30 best by BM25 (reciprocal rank) and reranks the final 6 with the
-cross-encoder. `--sem-bm25` turns the fusion off; there is no reason to.
+and runs BM25 on both strings. Measured on 140 questions it is worth +10 on
+hit@1 and +13 on hit@6 (62 → 72, 117 → 130) for no cost at all: you already
+know both languages, and most shelves are mostly English. Each round then fuses
+the 30 best documents by vector with the 30 best by BM25 (reciprocal rank) and
+reranks the final 6 with the cross-encoder; the fusion itself is worth +2 / +3
+/ 0 on top of `--tambem`, inside the noise. `--sem-bm25` turns it off; there is
+no reason to.
 
 **Read all six cards before choosing.** Card 1 is right in about half the
 questions; the six together in nine out of ten. Opening the first without

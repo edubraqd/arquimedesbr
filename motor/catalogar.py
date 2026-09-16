@@ -401,17 +401,19 @@ def gerar_indice(raiz: Path, manifesto: dict) -> None:
         f"**{_num(total_palavras)} palavras** em markdown.",
         "",
         f"Idioma dos documentos: {resumo_idioma}. Isso importa na hora de "
-        "perguntar: a busca lexica (`buscar.py`) so casa palavra, entao para "
-        "material em outro idioma use `semantico.py --hibrido`.",
+        "perguntar: escreva a pergunta nos dois idiomas (`--tambem`), porque "
+        "a maior parte do acervo esta em ingles e o motor soma os dois.",
         "",
         "Cada documento e uma pasta em `markdown/<categoria>/<documento>/` com um "
         "`INDEX.md` (sumario com paginas e contagem de palavras) e um arquivo por "
         "capitulo. Leia o `INDEX.md` do documento antes de abrir capitulo.",
         "",
-        "Busca antes de abrir arquivo. O padrao e o hibrido (sentido + termo exato):",
+        "Busca antes de abrir arquivo. A porta e o `consultar.py`: seis cartoes "
+        "de ~25 palavras, voce julga, abre so o escolhido ou gira a consulta:",
         "",
         "```bash",
-        'python semantico.py "objecao de preco" --hibrido --passagens',
+        'python consultar.py "objecao de preco" --tambem "price objection" --categoria vendas',
+        'python consultar.py --sessao <id> --abrir 2   # a janela so do cartao 2',
         'python buscar.py "useEffect"   # sigla, nome proprio',
         "```",
         "",
