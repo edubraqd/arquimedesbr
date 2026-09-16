@@ -6,11 +6,15 @@ toca disco nem rede.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import shutil
+import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 import buscar
 import dominio
@@ -114,6 +118,40 @@ class Utilidade(unittest.TestCase):
 
     def test_capitulo_curto_sai(self):
         self.assertFalse(qualidade.avaliar("1. Intro", "so vinte palavras " * 5)[0])
+
+    def test_bibliography_e_author_index_saem(self):
+        # medido em 16/09: "bibliograf" nao casa "Bibliography" (ph); 4 caps
+        # de 18,5k palavras + Author Index de 8k estavam util:sim
+        for titulo in ("Bibliography", "Bibliography (parte 1/2)", "Author Index",
+                       "Subject Index", "REFERENCES"):
+            with self.subTest(titulo=titulo):
+                self.assertTrue(qualidade.titulo_e_lixo(titulo))
+
+    def test_prefixo_numerico_nao_esconde_secao_de_apoio(self):
+        for titulo in ("5. References", "6. REFERENCES", "12 Bibliography",
+                       "### 8. References", "A. Bibliografia"):
+            with self.subTest(titulo=titulo):
+                self.assertTrue(qualidade.titulo_e_lixo(titulo))
+
+    def test_index_nao_pega_capitulo_sobre_indexacao(self):
+        # IIR cap. 4 e 5 ("Index construction", "Index compression") estavam
+        # fora da busca por causa do prefixo "index"
+        for titulo in ("Index construction", "Index compression", "Indexing",
+                       "Indexes and query plans"):
+            with self.subTest(titulo=titulo):
+                self.assertFalse(qualidade.titulo_e_lixo(titulo))
+        for titulo in ("Index", "INDEX", "Index (parte 1/2)", "Índice remissivo",
+                       "Index of terms"):
+            with self.subTest(titulo=titulo):
+                self.assertTrue(qualidade.titulo_e_lixo(titulo))
+
+    def test_add_to_cart_em_capitulo_longo_e_conteudo(self):
+        # 11 capitulos reais (AI-Powered Search 1 e 8, Modular Web Design 3-6,
+        # 6,3k-10k palavras, ate 20 "add to cart" por ser botao de e-commerce)
+        # estavam fora. Pagina de venda e UMA pagina: a unica real tem 659.
+        md = " ".join(f"palavra{i % 900}" for i in range(3000)) + " add to cart " * 5
+        util, _m = qualidade.avaliar("Chapter 3 Vary", md)
+        self.assertTrue(util)
 
 
 class PontilhadoDeSumario(unittest.TestCase):
@@ -289,6 +327,39 @@ class TravaEEscritaDoIndice(unittest.TestCase):
             with semantico.travar(self.raiz):
                 1 / 0
         self.assertFalse((self.raiz / semantico.ARQ_TRAVA).exists())
+
+    # Em 16/09/2026 um `indexar` morreu com a sessao que o lancou (PID 33812)
+    # e deixou a trava; a rodada seguinte recusou por 40 min ate alguem ler o
+    # log. A trava guarda o PID: se ele nao existe mais, ela e orfa e sai.
+    def test_trava_orfa_de_processo_morto_e_assumida(self):
+        (self.raiz / semantico.ARQ_TRAVA).write_text("99999999", encoding="utf-8")
+        with mock.patch.object(semantico, "_processo_vivo", return_value=False):
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                with semantico.travar(self.raiz):
+                    self.assertEqual(
+                        (self.raiz / semantico.ARQ_TRAVA).read_text(encoding="utf-8"),
+                        str(semantico.os.getpid()))
+        self.assertIn("99999999", err.getvalue())
+        self.assertFalse((self.raiz / semantico.ARQ_TRAVA).exists())
+
+    def test_trava_de_processo_vivo_continua_recusando(self):
+        (self.raiz / semantico.ARQ_TRAVA).write_text("4242", encoding="utf-8")
+        with mock.patch.object(semantico, "_processo_vivo", return_value=True):
+            with self.assertRaises(semantico.IndiceEmUso):
+                with semantico.travar(self.raiz):
+                    pass
+        self.assertTrue((self.raiz / semantico.ARQ_TRAVA).exists())
+
+    def test_trava_sem_pid_legivel_continua_recusando(self):
+        # arquivo vazio ou lixo: nao da para saber de quem e, entao nao mexe
+        (self.raiz / semantico.ARQ_TRAVA).write_text("", encoding="utf-8")
+        with self.assertRaises(semantico.IndiceEmUso):
+            with semantico.travar(self.raiz):
+                pass
+
+    def test_processo_vivo_reconhece_o_proprio_e_nega_pid_impossivel(self):
+        self.assertTrue(semantico._processo_vivo(semantico.os.getpid()))
+        self.assertFalse(semantico._processo_vivo(2**22 + 12345))
 
     def test_escrita_atomica_preserva_a_extensao(self):
         # np.savez_compressed acrescenta ".npz" sozinho: se o temporario for
@@ -491,6 +562,146 @@ class Realimentacao(unittest.TestCase):
     def test_constantes_sao_as_do_livro(self):
         self.assertEqual((consultar.ALFA, consultar.BETA, consultar.GAMA),
                          (1.0, 0.75, 0.15))
+
+
+class PorteiroDoRecorte(unittest.TestCase):
+    """Consulta nova sem recorte para, e categoria inexistente para com erro.
+
+    O segundo caso e o que justifica o teste: sem validar, `--categoria vendass`
+    monta um filtro vazio, a busca nao encontra nada e o programa imprime uma
+    lista vazia com codigo 0 -- falha silenciosa, o pior modo.
+    """
+
+    def setUp(self):
+        self.raiz = Path(tempfile.mkdtemp())
+        for cat in ("vendas", "agentes-llm", "inventada-sem-dominio"):
+            for doc in ("a", "b"):
+                (self.raiz / "markdown" / cat / doc).mkdir(parents=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.raiz, ignore_errors=True)
+
+    def roda(self, *args):
+        """Chama o CLI de verdade, capturando saida e codigo de retorno."""
+        saida = io.StringIO()
+        argv = ["consultar.py", "--raiz", str(self.raiz), *args]
+        with mock.patch.object(sys, "argv", argv),              contextlib.redirect_stdout(saida):
+            codigo = consultar.main()
+        return codigo, saida.getvalue()
+
+    def test_sem_recorte_recusa_e_lista_categorias(self):
+        codigo, saida = self.roda("como responder que esta caro")
+        self.assertEqual(codigo, 2)
+        self.assertIn("exige recorte", saida)
+        self.assertIn("vendas(2)", saida)
+
+    def test_categoria_inexistente_nao_falha_calada(self):
+        codigo, saida = self.roda("x", "--categoria", "vendass")
+        self.assertEqual(codigo, 2)
+        self.assertIn("nao existe na base", saida)
+
+    def test_dominio_inexistente_lista_os_que_existem(self):
+        codigo, saida = self.roda("x", "--dominio", "comercialx")
+        self.assertEqual(codigo, 2)
+        self.assertIn("comercial, pessoal, tecnico", saida)
+
+    def test_sem_recorte_explicito_passa_do_porteiro(self):
+        # passa o porteiro e morre depois, no indice que nao existe nesta raiz
+        codigo, saida = self.roda("x", "--sem-recorte")
+        self.assertEqual(codigo, 1)
+        self.assertIn("indice semantico nao existe", saida)
+
+    def test_categorias_lista_por_dominio_e_sai(self):
+        codigo, saida = self.roda("--categorias")
+        self.assertEqual(codigo, 0)
+        self.assertIn("comercial: vendas(2)", saida)
+        self.assertIn("tecnico: agentes-llm(2)", saida)
+
+    def test_categoria_sem_dominio_aparece_em_vez_de_sumir(self):
+        _codigo, saida = self.roda("--categorias")
+        self.assertIn("inventada-sem-dominio(2)", saida)
+        self.assertIn("sem dominio", saida)
+
+
+class SecoNoMoverERemover(unittest.TestCase):
+    """`--seco` precisa valer para --mover e --remover.
+
+    Ate 10/09/2026 nao valia: `processar.py --mover X --para Y --seco` movia a
+    pasta de verdade (descoberto movendo 11 documentos de categoria -- a previa
+    executou), e o `--remover --seco` chamava shutil.rmtree no markdown. Uma
+    previa que muta o disco e pior que nao ter previa: quem roda confia nela.
+    """
+
+    CATEGORIA = "vendas"
+    OUTRA = "marketing"
+    PASTA = "livro-qualquer"
+
+    def setUp(self):
+        self.raiz = Path(tempfile.mkdtemp())
+        doc = self.raiz / "markdown" / self.CATEGORIA / self.PASTA
+        doc.mkdir(parents=True)
+        rotulo = catalogar.ROTULOS[self.CATEGORIA]
+        (doc / "01-abertura.md").write_text(
+            f'---\ncategoria: "{self.CATEGORIA}"\n'
+            f'categoria_rotulo: "{rotulo}"\n---\ncorpo\n',
+            encoding="utf-8")
+        (self.raiz / "processado" / self.CATEGORIA).mkdir(parents=True)
+        (self.raiz / "processado" / self.CATEGORIA / "x.pdf").write_bytes(b"%PDF")
+        self.manifesto = {"abc123": {
+            "pasta": self.PASTA, "status": "ok", "categoria": self.CATEGORIA,
+            "arquivo": "x.pdf", "titulo": "Livro Qualquer", "capitulos": 1,
+            "palavras": 10, "paginas": 2, "idioma": "pt",
+        }}
+
+    def tearDown(self):
+        shutil.rmtree(self.raiz, ignore_errors=True)
+
+    def existe(self, categoria):
+        return (self.raiz / "markdown" / categoria / self.PASTA).exists()
+
+    def roda(self, fn, *args, **kw):
+        saida = io.StringIO()
+        with contextlib.redirect_stdout(saida):
+            codigo = fn(self.raiz, self.manifesto, *args, **kw)
+        return codigo, saida.getvalue()
+
+    def test_mover_seco_nao_move(self):
+        codigo, saida = self.roda(processar.recategorizar, self.PASTA,
+                                  self.OUTRA, seco=True)
+        self.assertEqual(codigo, 0)
+        self.assertIn("seco", saida)
+        self.assertTrue(self.existe(self.CATEGORIA))
+        self.assertFalse(self.existe(self.OUTRA))
+        self.assertEqual(self.manifesto["abc123"]["categoria"], self.CATEGORIA)
+
+    def test_mover_de_verdade_move_e_troca_o_frontmatter(self):
+        codigo, _s = self.roda(processar.recategorizar, self.PASTA, self.OUTRA)
+        self.assertEqual(codigo, 0)
+        self.assertTrue(self.existe(self.OUTRA))
+        self.assertFalse(self.existe(self.CATEGORIA))
+        md = (self.raiz / "markdown" / self.OUTRA / self.PASTA /
+              "01-abertura.md").read_text(encoding="utf-8")
+        self.assertIn(f'categoria: "{self.OUTRA}"', md)
+        self.assertIn(catalogar.ROTULOS[self.OUTRA], md)
+
+    def test_categoria_inexistente_para_antes_de_tocar_o_disco(self):
+        """Esta guarda ja existia no topo de recategorizar; o teste a fixa."""
+        codigo, saida = self.roda(processar.recategorizar, self.PASTA,
+                                  "categoria-que-nao-existe")
+        self.assertEqual(codigo, 1)
+        self.assertIn("categoria invalida", saida)
+        # o documento nao pode ter saido do lugar
+        self.assertTrue(self.existe(self.CATEGORIA))
+        self.assertFalse((self.raiz / "markdown" /
+                          "categoria-que-nao-existe").exists())
+
+    def test_remover_seco_nao_apaga_markdown(self):
+        codigo, saida = self.roda(processar.remover, self.PASTA, "teste",
+                                  seco=True)
+        self.assertEqual(codigo, 0)
+        self.assertIn("seco", saida)
+        self.assertTrue(self.existe(self.CATEGORIA))
+        self.assertEqual(self.manifesto["abc123"]["status"], "ok")
 
 
 class TipoDeDocumento(unittest.TestCase):
@@ -778,6 +989,24 @@ class Busca(unittest.TestCase):
         self.assertEqual(campos["titulo"], "X")
         self.assertEqual(campos["util"], "nao")
 
+    def test_indice_com_capitulo_util_nao_nao_reconstroi_a_toa(self):
+        """Medido em 16/09: 139 capitulos `util: nao` nunca entram em `docs`,
+        entao `_mudou` via 3.207 arquivos contra 3.068 e reconstruia o indice
+        de 51 MB (159 s) em TODA consulta."""
+        raiz = Path(tempfile.mkdtemp())
+        pasta = raiz / "markdown" / "vendas" / "livro"
+        pasta.mkdir(parents=True)
+        (pasta / "01.md").write_text('---\ntitulo: "L"\n---\npreco objecao valor',
+                                    encoding="utf-8")
+        (pasta / "02.md").write_text('---\ntitulo: "L"\nutil: "nao"\n---\nsumario',
+                                    encoding="utf-8")
+        try:
+            indice = buscar.carregar_indice(raiz)
+            self.assertEqual(len(indice["docs"]), 1)
+            self.assertFalse(buscar._mudou(raiz, indice))
+        finally:
+            shutil.rmtree(raiz, ignore_errors=True)
+
 
 class Passagens(unittest.TestCase):
     def test_janela_desliza_com_sobreposicao(self):
@@ -888,6 +1117,498 @@ class IndiceSemantico(unittest.TestCase):
         self.assertEqual(meta["titulo"], "livro-x")
         self.assertEqual(meta["categoria"], "vendas")
         self.assertEqual(meta["idioma"], "xx")
+
+
+class ConsultaHibrida(unittest.TestCase):
+    """consultar.py de 16/09: BM25 por RRF, `--tambem`, dedup por documento,
+    `--mais`, categoria esgotada -> dominio, `--abrir` sem indice.
+
+    Base pequena com vetores de 4 dimensoes e o modelo de embedding trocado
+    por um dicionario: o que se testa e o ranking, nao o modelo.
+    """
+
+    VETORES = {
+        "pt": [1.0, 0.0, 0.0, 0.0],
+        "rocchio": [0.0, 1.0, 0.0, 0.0],     # faz as vezes do "--tambem" em ingles
+    }
+    # (categoria, doc, arquivo, capitulo, texto, vetor)
+    DOCS = [
+        ("vendas", "livro-a", "01-preco.md", "Preco",
+         "objecao de preco desconto valor caro", [0.90, 0.10, 0.0, 0.0]),
+        ("vendas", "livro-b", "01-abrir.md", "Abrir",
+         "abertura da conversa fria com o cliente", [0.95, 0.00, 0.0, 0.0]),
+        ("vendas", "livro-b", "02-fechar.md", "Fechar",
+         "fechamento da venda e proximo passo", [0.50, 0.00, 0.8, 0.0]),
+        ("vendas", "livro-c", "01-rocchio.md", "Rocchio",
+         "rocchio relevance feedback query expansion", [0.0, 0.0, 1.0, 0.0]),
+        ("python", "livro-d", "01-tipos.md", "Tipos",
+         "tipos e anotacoes em python", [0.0, 0.0, 0.0, 1.0]),
+        ("rust", "livro-e", "01-borrow.md", "Borrow",
+         "borrow checker e ownership", [0.0, 0.0, 0.0, 0.9]),
+    ]
+
+    def setUp(self):
+        import json
+
+        import numpy as np
+
+        self.raiz = Path(tempfile.mkdtemp())
+        passagens, vetores = [], []
+        for cat, doc, arq, cap, texto, vet in self.DOCS:
+            pasta = self.raiz / "markdown" / cat / doc
+            pasta.mkdir(parents=True, exist_ok=True)
+            (pasta / arq).write_text(
+                f'---\ntitulo: "{doc}"\ncapitulo: "{cap}"\ncategoria: "{cat}"\n'
+                f'paginas: "1-2"\n---\n{texto}\n', encoding="utf-8")
+            passagens.append({"caminho": f"markdown/{cat}/{doc}/{arq}", "ini": 0,
+                              "n": len(texto.split()), "titulo": doc,
+                              "capitulo": cap, "categoria": cat, "idioma": "pt",
+                              "paginas": "1-2"})
+            vetores.append(vet)
+        np.savez_compressed(self.raiz / semantico.ARQ_VETORES,
+                            v=np.array(vetores, dtype=np.float16))
+        (self.raiz / semantico.ARQ_META).write_text(
+            json.dumps({"passagens": passagens}), encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.raiz, ignore_errors=True)
+
+    def roda(self, *args):
+        import numpy as np
+
+        def vetor(texto):
+            return np.array(self.VETORES[texto], dtype=np.float32)
+
+        saida = io.StringIO()
+        argv = ["consultar.py", "--raiz", str(self.raiz), "--sem-rerank", *args]
+        with mock.patch.object(sys, "argv", argv), \
+                mock.patch.object(consultar, "_vetor_da_consulta", side_effect=vetor), \
+                contextlib.redirect_stdout(saida):
+            codigo = consultar.main()
+        return codigo, saida.getvalue()
+
+    def sessao(self, saida):
+        import re
+        return re.search(r"sessao (\w+) ·", saida).group(1)
+
+    def docs(self, saida):
+        import re
+        return re.findall(r"^\d+\. [+-][\d.]+\s+(\S+)", saida, re.M)
+
+    def test_rodada_2_nao_repete_documento_ja_julgado(self):
+        # Reproduz o bug de 16/09: o dedup era por passagem. Marcado livro-c
+        # como bom, a consulta anda para o eixo dele e o capitulo 2 do livro-b
+        # (que tambem aponta para la) vira a melhor passagem do livro-b -- e o
+        # livro-b, ja julgado, voltava como se fosse novidade.
+        _c, saida = self.roda("pt", "--categoria", "vendas", "--n", "3")
+        self.assertEqual(self.docs(saida), ["livro-b", "livro-a", "livro-c"])
+        _c, saida2 = self.roda("--sessao", self.sessao(saida),
+                               "--sim", "3", "--nao", "1,2")
+        self.assertNotIn("livro-b", self.docs(saida2))
+
+    def test_bm25_traz_documento_que_o_vetor_nao_acha(self):
+        # "rocchio" so existe no livro-c, cujo vetor e ortogonal a consulta
+        _c, saida = self.roda("pt", "--tambem", "rocchio", "--categoria", "vendas",
+                              "--n", "2")
+        self.assertIn("livro-c", self.docs(saida))
+
+    def test_tambem_move_o_vetor_para_o_meio_dos_dois_idiomas(self):
+        import json
+
+        import numpy as np
+
+        _c, saida = self.roda("pt", "--tambem", "rocchio", "--categoria", "vendas")
+        s = json.loads((self.raiz / consultar.ARQ_SESSOES).read_text("utf-8"))
+        q = np.asarray(s[self.sessao(saida)]["q"])
+        np.testing.assert_allclose(q, [0.7071, 0.7071, 0, 0], atol=1e-3)
+
+    def test_mais_lista_outros_capitulos_do_mesmo_documento(self):
+        _c, saida = self.roda("pt", "--categoria", "vendas", "--n", "2")
+        self.assertEqual(self.docs(saida)[0], "livro-b")
+        _c, mais = self.roda("--sessao", self.sessao(saida), "--mais", "1")
+        self.assertIn("Fechar", mais)
+        self.assertNotIn("livro-a", mais)
+        # o capitulo novo ganha numero e pode ser aberto
+        _c, aberto = self.roda("--sessao", self.sessao(saida), "--abrir", "3")
+        self.assertIn("fechamento da venda", aberto)
+
+    def test_categoria_esgotada_completa_com_o_dominio(self):
+        _c, saida = self.roda("pt", "--categoria", "python", "--n", "3")
+        self.assertEqual(self.docs(saida), ["livro-d", "livro-e"])
+        self.assertIn("categoria python esgotada", saida)
+        self.assertIn("dominio tecnico", saida)
+
+    def test_abrir_nao_precisa_do_indice(self):
+        _c, saida = self.roda("pt", "--categoria", "vendas")
+        (self.raiz / semantico.ARQ_VETORES).unlink()
+        (self.raiz / semantico.ARQ_META).unlink()
+        codigo, aberto = self.roda("--sessao", self.sessao(saida), "--abrir", "1")
+        self.assertEqual(codigo, 0)
+        self.assertIn("abertura da conversa fria", aberto)
+
+    def test_sessao_guarda_o_recorte_e_nao_os_indices(self):
+        import json
+
+        _c, saida = self.roda("pt", "--categoria", "vendas")
+        s = json.loads((self.raiz / consultar.ARQ_SESSOES).read_text("utf-8"))
+        s = s[self.sessao(saida)]
+        self.assertEqual(s["categoria"], "vendas")
+        self.assertNotIn("indices", s)
+
+
+class ReferenciasDentroDoCapitulo(unittest.TestCase):
+    """Bibliografia no fim de capitulo de conteudo vira capitulo proprio, util:nao.
+
+    Medido em 16/09/2026: 289 capitulos `util: sim` carregavam 538k palavras
+    de referencias (282k em dados-ml, 100k em agentes-llm). Cada entrada de
+    bibliografia e uma passagem que compete no ranking com o texto de verdade.
+    """
+
+    def refs(self, n=60):
+        return "\n".join(f"Autor{i}, A. and Outro{i}, B. ({1990 + i % 30}). Titulo "
+                         f"do artigo {i}. Journal, 12(3), pp. {i}-{i + 9}."
+                         for i in range(n))
+
+    def corpo(self, n=400):
+        return " ".join(f"conceito{i % 80} explicado{i % 7}" for i in range(n))
+
+    def test_separa_o_bloco_de_referencias(self):
+        md = self.corpo() + "\n\n### References\n\n" + self.refs()
+        corpo, bloco = fatiar.separar_referencias(md)
+        self.assertNotIn("Autor1,", corpo)
+        self.assertIn("conceito1 ", corpo)
+        self.assertIn("Autor1,", bloco)
+
+    def test_apendice_depois_das_referencias_volta_ao_corpo(self):
+        # 148 dos 289 casos medidos tem apendice depois das referencias;
+        # a entrada de bibliografia que virou "###" nao conta como titulo
+        md = (self.corpo() + "\n\nReferences\n\n" + self.refs()
+              + "\n\n### Anthropic. Claude haiku 4.5. https://www.anthropic.com\n"
+              + "\n\n### A Dataset Details\n\n"
+              + self.corpo(200).replace("conceito", "apendice"))
+        corpo, bloco = fatiar.separar_referencias(md)
+        self.assertIn("apendice1 ", corpo)
+        self.assertNotIn("apendice1 ", bloco)
+        self.assertIn("anthropic.com", bloco)
+
+    def test_mencao_curta_nao_corta(self):
+        md = self.corpo() + "\n\nReferences\n\n" + self.refs(3)
+        self.assertIsNone(fatiar.separar_referencias(md))
+
+    def test_prosa_depois_do_titulo_nao_e_bibliografia(self):
+        # "References" como titulo de secao de prosa (sem ano, sem pp.)
+        md = self.corpo() + "\n\n## References\n\n" + self.corpo(300)
+        self.assertIsNone(fatiar.separar_referencias(md))
+
+    def paginas(self, *textos):
+        class Pag:
+            def __init__(self, numero, md):
+                self.numero, self.md = numero, md
+                self.palavras = len(md.split())
+
+        class Doc:
+            toc, aberturas = None, None
+
+        d = Doc()
+        d.paginas = [Pag(i + 1, t) for i, t in enumerate(textos)]
+        return d
+
+    def test_fatiar_da_capitulo_proprio_as_referencias(self):
+        doc = self.paginas(self.corpo(600) + "\n\n### References\n\n" + self.refs())
+        caps = fatiar.fatiar(doc)
+        titulos = [c.titulo for c in caps]
+        self.assertIn("References", titulos)
+        self.assertNotIn("Autor1,", caps[0].md)
+        self.assertTrue(qualidade.titulo_e_lixo(caps[-1].titulo))
+
+    def test_secao_de_apoio_curta_nao_gruda_no_capitulo_anterior(self):
+        # "gruda no anterior" (< 400 palavras) era outra porta de entrada da
+        # bibliografia no capitulo de conteudo
+        doc = self.paginas(self.corpo(600), "### References\n\n" + self.refs(20))
+        doc.toc = [[1, "Capitulo 1", 1], [1, "References", 2]]
+        caps = fatiar.fatiar(doc)
+        self.assertNotIn("Autor1,", caps[0].md)
+
+
+class ReentradaNoIndice(unittest.TestCase):
+    """Capitulo que passa de util:nao para util:sim tem de ser embutido.
+
+    Medido em 16/09: 10 capitulos (70k palavras) reabilitados por `--revisar`
+    nunca entraram no indice -- o hash do corpo nao mudou, o metadado mudou,
+    e o caminho de "metadado novo" so relia passagens que ja existiam.
+    """
+
+    def setUp(self):
+        import numpy as np
+
+        self.raiz = Path(tempfile.mkdtemp())
+        self.md = self.raiz / "markdown" / "vendas" / "livro" / "01-cap.md"
+        self.md.parent.mkdir(parents=True)
+        self.escreve("nao")
+
+        class Modelo:
+            def embed(self, textos, batch_size=64):
+                for _t in textos:
+                    yield np.ones(384, dtype=np.float32)
+
+        self.patch = mock.patch.object(semantico, "_modelo", return_value=Modelo())
+        self.patch.start()
+
+    def tearDown(self):
+        self.patch.stop()
+        shutil.rmtree(self.raiz, ignore_errors=True)
+
+    def escreve(self, util):
+        corpo = " ".join(f"palavra{i % 50}" for i in range(200))
+        self.md.write_text(f'---\ntitulo: "L"\nutil: "{util}"\n---\n{corpo}\n',
+                           encoding="utf-8")
+
+    def indexa(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return semantico.indexar(self.raiz)
+
+    def test_nao_para_sim_reentra(self):
+        self.assertEqual(len(self.indexa()["passagens"]), 0)
+        self.escreve("sim")
+        self.assertGreater(len(self.indexa()["passagens"]), 0)
+
+    def test_sim_para_nao_sai(self):
+        self.escreve("sim")
+        self.assertGreater(len(self.indexa()["passagens"]), 0)
+        self.escreve("nao")
+        self.assertEqual(len(self.indexa()["passagens"]), 0)
+
+
+class RevisarSeparaReferencias(unittest.TestCase):
+    """`processar.py --revisar` aplica o corte de referencias ao markdown que existe."""
+
+    def setUp(self):
+        self.raiz = Path(tempfile.mkdtemp())
+        doc = self.raiz / "markdown" / "agentes-llm" / "paper-x"
+        doc.mkdir(parents=True)
+        refs = "\n".join(f"Autor{i}, A. ({2000 + i % 20}). Titulo {i}. pp. {i}-{i + 3}."
+                         for i in range(60))
+        corpo = " ".join(f"conceito{i % 80}" for i in range(500))
+        (doc / "01-trecho-1.md").write_text(
+            '---\ntitulo: "Paper X"\ncategoria: "agentes-llm"\ncapitulo: "Trecho 1"\n'
+            'util: "sim"\n---\n# Trecho 1\n\n' + corpo + "\n\nReferences\n\n" + refs + "\n",
+            encoding="utf-8")
+        self.doc = doc
+        self.manifesto = {"abc": {"pasta": "paper-x", "status": "ok",
+                                  "categoria": "agentes-llm", "titulo": "Paper X",
+                                  "capitulos": 1, "idioma": "en", "tipo": "paper"}}
+
+    def tearDown(self):
+        shutil.rmtree(self.raiz, ignore_errors=True)
+
+    def test_revisar_corta_e_marca_util_nao(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            processar.revisar(self.raiz, self.manifesto)
+        original = (self.doc / "01-trecho-1.md").read_text(encoding="utf-8")
+        self.assertNotIn("Autor1,", original)
+        novo = self.doc / "01-trecho-1.referencias.md"
+        self.assertTrue(novo.exists())
+        texto = novo.read_text(encoding="utf-8")
+        self.assertIn("Autor1,", texto)
+        self.assertIn('util: "nao"', texto)
+
+    def test_revisar_seco_nao_corta(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            processar.revisar(self.raiz, self.manifesto, seco=True)
+        self.assertIn("Autor1,", (self.doc / "01-trecho-1.md").read_text(encoding="utf-8"))
+        self.assertFalse((self.doc / "01-trecho-1.referencias.md").exists())
+
+    def test_segunda_passada_nao_corta_de_novo(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            processar.revisar(self.raiz, self.manifesto)
+            processar.revisar(self.raiz, self.manifesto)
+        self.assertEqual(len(list(self.doc.glob("*.referencias.md"))), 1)
+
+
+class GuardaIndiceDisco(unittest.TestCase):
+    """O indice diz de que disco ele foi feito; a consulta confere antes de usar.
+
+    Em 14/09 um A/B deixou o indice orfao (6.412 passagens apontando para
+    arquivo que nao existia) e ninguem viu ate 16/09: 90 capitulos util:sim
+    fora da busca por dois dias. `conferir` compara o mtime gravado no indice
+    com o do disco -- 0,2 s -- e a consulta avisa em vez de calar.
+    """
+
+    def setUp(self):
+        import numpy as np
+
+        self.raiz = Path(tempfile.mkdtemp())
+        self.pasta = self.raiz / "markdown" / "vendas" / "livro"
+        self.pasta.mkdir(parents=True)
+        self.md = self.pasta / "01-cap.md"
+        self.md.write_text('---\ntitulo: "L"\n---\n' + "palavra " * 100, encoding="utf-8")
+
+        class Modelo:
+            def embed(self, textos, batch_size=64):
+                for _t in textos:
+                    yield np.ones(384, dtype=np.float32)
+
+        self.patch = mock.patch.object(semantico, "_modelo", return_value=Modelo())
+        self.patch.start()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.meta = semantico.indexar(self.raiz)
+
+    def tearDown(self):
+        self.patch.stop()
+        shutil.rmtree(self.raiz, ignore_errors=True)
+
+    def test_em_dia_nao_avisa(self):
+        self.assertIsNone(semantico.conferir(self.raiz, self.meta))
+
+    def test_arquivo_novo_avisa(self):
+        (self.pasta / "02-novo.md").write_text("---\n---\nnovo " * 50, encoding="utf-8")
+        aviso = semantico.conferir(self.raiz, self.meta)
+        self.assertIn("1 novo", aviso)
+        self.assertIn("indexar", aviso)
+
+    def test_arquivo_reescrito_avisa(self):
+        import os
+        os.utime(self.md, (1e9, 1e9))
+        self.assertIn("1 alterado", semantico.conferir(self.raiz, self.meta))
+
+    def test_arquivo_sumido_avisa(self):
+        self.md.unlink()
+        self.assertIn("1 sumido", semantico.conferir(self.raiz, self.meta))
+
+    def test_indexar_sem_mudanca_ainda_carimba_indice_antigo(self):
+        # indice de antes de 16/09 nao tem mtimes: a proxima indexacao, mesmo
+        # sem nada para embutir, grava o carimbo em vez de dizer "nada mudou"
+        import json
+        meta_path = self.raiz / semantico.ARQ_META
+        antigo = json.loads(meta_path.read_text(encoding="utf-8"))
+        antigo.pop("mtimes")
+        meta_path.write_text(json.dumps(antigo), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            semantico.indexar(self.raiz)
+        novo = json.loads(meta_path.read_text(encoding="utf-8"))
+        self.assertIn("mtimes", novo)
+
+    def test_consulta_avisa_na_stderr(self):
+        import numpy as np
+
+        (self.pasta / "02-novo.md").write_text("---\n---\nnovo " * 50, encoding="utf-8")
+        erro, saida = io.StringIO(), io.StringIO()
+        argv = ["consultar.py", "--raiz", str(self.raiz), "--sem-rerank",
+                "--sem-recorte", "x"]
+        with mock.patch.object(sys, "argv", argv), \
+                mock.patch.object(consultar, "_vetor_da_consulta",
+                                  return_value=np.ones(384, dtype=np.float32)), \
+                contextlib.redirect_stdout(saida), contextlib.redirect_stderr(erro):
+            consultar.main()
+        self.assertIn("indice semantico desatualizado", erro.getvalue())
+
+
+class ProcessarEncadeiaIndexar(unittest.TestCase):
+    """Mexeu no markdown, reindexa. Antes so avisava, e o aviso era ignorado
+    (indice orfao por dois dias em 14-16/09)."""
+
+    def setUp(self):
+        self.raiz = Path(tempfile.mkdtemp())
+        (self.raiz / "markdown").mkdir()
+        (self.raiz / "manifesto.json").write_text("{}", encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.raiz, ignore_errors=True)
+
+    def roda(self, *args):
+        argv = ["processar.py", "--raiz", str(self.raiz), *args]
+        with mock.patch.object(sys, "argv", argv), \
+                mock.patch.object(processar.semantico, "indexar") as indexar, \
+                contextlib.redirect_stdout(io.StringIO()):
+            processar.main()
+        return indexar
+
+    def test_revisar_reindexa(self):
+        self.assertTrue(self.roda("--revisar").called)
+
+    def test_revisar_seco_nao_reindexa(self):
+        self.assertFalse(self.roda("--revisar", "--seco").called)
+
+    def test_sem_indexar_desliga(self):
+        self.assertFalse(self.roda("--revisar", "--sem-indexar").called)
+
+
+class ServidorResidente(ConsultaHibrida):
+    """`servidor.py` guarda indice e modelos em memoria; `consultar.py` encaminha.
+
+    Medido em 16/09: 8-19 s por rodada, dos quais 0,4 s de trabalho -- o resto
+    e carregar json (80 MB), npz (175 MB), modelo (3-9 s) e cross-encoder
+    (3 s) a cada chamada. Herda a base pequena de ConsultaHibrida.
+    """
+
+    def setUp(self):
+        import socket
+        import threading
+
+        import servidor
+
+        super().setUp()
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            self.porta = sock.getsockname()[1]
+        self.httpd = servidor.montar(self.raiz, self.porta)
+        self.fio = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.fio.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        super().tearDown()
+
+    def roda(self, *args):
+        return super().roda("--porta", str(self.porta), *args)
+
+    # os testes herdados rodam todos de novo, agora pelo servidor
+
+    def test_o_servidor_e_quem_atende(self):
+        import servidor
+
+        antes = servidor.ATENDIDAS
+        codigo, saida = self.roda("pt", "--categoria", "vendas", "--n", "2")
+        self.assertEqual(codigo, 0)
+        self.assertEqual(self.docs(saida), ["livro-b", "livro-a"])
+        self.assertEqual(servidor.ATENDIDAS, antes + 1)
+
+    def test_local_ignora_o_servidor(self):
+        import servidor
+
+        antes = servidor.ATENDIDAS
+        _c, saida = self.roda("pt", "--categoria", "vendas", "--n", "2", "--local")
+        self.assertEqual(self.docs(saida), ["livro-b", "livro-a"])
+        self.assertEqual(servidor.ATENDIDAS, antes)
+
+    def test_indice_novo_no_disco_entra_sem_reiniciar(self):
+        import json
+        import os
+
+        import numpy as np
+
+        self.roda("pt", "--categoria", "vendas", "--n", "2")
+        # troca o indice: so o livro-c, com vetor igual a consulta
+        meta = {"passagens": [{"caminho": "markdown/vendas/livro-c/01-rocchio.md",
+                               "ini": 0, "n": 5, "titulo": "livro-c",
+                               "capitulo": "Rocchio", "categoria": "vendas",
+                               "idioma": "pt", "paginas": "1-2"}]}
+        (self.raiz / semantico.ARQ_META).write_text(json.dumps(meta), encoding="utf-8")
+        np.savez_compressed(self.raiz / semantico.ARQ_VETORES,
+                            v=np.array([[1.0, 0, 0, 0]], dtype=np.float16))
+        os.utime(self.raiz / semantico.ARQ_META, (2e9, 2e9))
+        _c, saida = self.roda("pt", "--categoria", "vendas", "--n", "2")
+        self.assertEqual(self.docs(saida), ["livro-c"])
+
+    def test_porta_fechada_cai_para_local(self):
+        import servidor
+
+        antes = servidor.ATENDIDAS
+        _c, saida = ConsultaHibrida.roda(self, "--porta", "1", "pt",
+                                         "--categoria", "vendas", "--n", "2")
+        self.assertEqual(self.docs(saida), ["livro-b", "livro-a"])
+        self.assertEqual(servidor.ATENDIDAS, antes)
 
 
 if __name__ == "__main__":

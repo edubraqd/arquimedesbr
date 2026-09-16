@@ -1,0 +1,457 @@
+{
+  "_leia": "Categoria escolhida por um agente lendo so a pergunta, sem ver o alvo. Serve para medir o caminho que roda de verdade (o agente passa --categoria), contra o centroide e o voto, que sao automaticos e nao rendem. As 53 primeiras foram geradas em 07/09/2026; as 87 restantes em 10/09/2026, a partir da lista de perguntas extraida sem os alvos e ordenada alfabeticamente, para a vizinhanca no gabarito (que agrupa por categoria) nao vazar.",
+  "_contaminadas": [
+    "como responder quando o cliente diz que esta muito caro",
+    "que perguntas fazer numa visita para o cliente perceber o problema sozinho",
+    "como manter o funil cheio fazendo contato novo todo dia",
+    "vale separar quem procura cliente de quem fecha a venda",
+    "o que a pesquisa mostra sobre meta e comissao de vendedor",
+    "como descobrir a diferenca entre a situacao atual e a desejada do cliente",
+    "que tipos de abertura existem para uma carta de vendas",
+    "como montar a narrativa com o cliente no papel de heroi",
+    "qual a estrutura de um texto de venda do inicio ao pedido",
+    "como conversar com cliente sem receber elogio vazio sobre a ideia",
+    "como decidir o que planejar antes de comecar um projeto",
+    "como usar espacamento e contraste para guiar o olho na tela",
+    "quando usar RAG em vez de ajustar o modelo",
+    "o que acontece no cerebro na hora de decidir a compra",
+    "agente que fica ligado o tempo todo guarda o que, e quem controla isso",
+    "as defesas contra injecao de prompt aguentam contexto longo",
+    "como avaliar se uma acao esta barata olhando o balanco da empresa",
+    "como montar uma oferta dificil de recusar sem baixar o preco",
+    "como se faz teste de invasao e exploracao de vulnerabilidade",
+    "como usar Python para escrever ferramenta de seguranca ofensiva",
+    "da para extrair o raciocinio interno de um modelo fechado pela API",
+    "de que jeitos um sistema de agente consegue melhorar a si mesmo",
+    "o que a pesquisa diz sobre construir marca pessoal",
+    "o que e margem de seguranca e por que exigir uma",
+    "o que quebra quando varios agentes seguros trabalham juntos",
+    "panorama de como se projeta o sistema em volta do modelo para ele executar tarefa",
+    "por que defesa que so olha a superficie do texto nao segura vazamento de dado",
+    "por que o fundador deveria se prender ao problema e nao a solucao",
+    "por que solucao que nao faz sentido logico as vezes funciona melhor",
+    "que criterios Buffett e Munger usam para escolher em que empresa por dinheiro",
+    "que superficie de ataque abre quando o agente usa MCP e habilidades de terceiro"
+  ],
+  "como responder quando o cliente diz que esta muito caro": [
+    "vendas"
+  ],
+  "que perguntas fazer numa visita para o cliente perceber o problema sozinho": [
+    "vendas"
+  ],
+  "como manter o funil cheio fazendo contato novo todo dia": [
+    "vendas"
+  ],
+  "vale separar quem procura cliente de quem fecha a venda": [
+    "vendas"
+  ],
+  "o que a pesquisa mostra sobre meta e comissao de vendedor": [
+    "vendas"
+  ],
+  "como descobrir a diferenca entre a situacao atual e a desejada do cliente": [
+    "vendas"
+  ],
+  "que tipos de abertura existem para uma carta de vendas": [
+    "copy-persuasao"
+  ],
+  "como escrever um titulo que faz a pessoa continuar lendo": [
+    "copy-persuasao"
+  ],
+  "por que devolver um favor nos deixa mais propensos a dizer sim": [
+    "copy-persuasao"
+  ],
+  "como montar a narrativa com o cliente no papel de heroi": [
+    "copy-persuasao"
+  ],
+  "qual a estrutura de um texto de venda do inicio ao pedido": [
+    "copy-persuasao"
+  ],
+  "como definir para quem meu produto serve e contra o que ele compete": [
+    "posicionamento-negocio"
+  ],
+  "como cobrar pelo valor entregue em vez de por hora trabalhada": [
+    "posicionamento-negocio"
+  ],
+  "por que oferecer tres opcoes de preco em vez de uma": [
+    "posicionamento-negocio"
+  ],
+  "como transformar servico avulso em receita que se repete todo mes": [
+    "posicionamento-negocio"
+  ],
+  "como escolher um nicho estreito e virar referencia nele": [
+    "posicionamento-negocio"
+  ],
+  "por que marca cara nao faz promocao nem desconto": [
+    "posicionamento-negocio"
+  ],
+  "como conversar com cliente sem receber elogio vazio sobre a ideia": [
+    "posicionamento-negocio"
+  ],
+  "como decidir o que planejar antes de comecar um projeto": [
+    "posicionamento-negocio"
+  ],
+  "como usar espacamento e contraste para guiar o olho na tela": [
+    "ux-conversao"
+  ],
+  "por que o visitante nao deveria precisar pensar para navegar": [
+    "ux-conversao"
+  ],
+  "como testar mudancas na pagina para vender mais": [
+    "ux-conversao"
+  ],
+  "como manter conversa com usuario toda semana sem virar projeto": [
+    "ux-conversao"
+  ],
+  "como usar progresso e recompensa para manter a pessoa engajada": [
+    "ciencia-cognitiva"
+  ],
+  "quanto tempo a pessoa espera antes de desistir de uma tela": [
+    "ux-conversao"
+  ],
+  "como limitar a complexidade de um metodo para caber na cabeca": [
+    "engenharia-software"
+  ],
+  "por que ciclo de retorno curto melhora o software": [
+    "engenharia-software"
+  ],
+  "por que nao repetir o mesmo conhecimento em dois lugares do codigo": [
+    "engenharia-software"
+  ],
+  "como isolar o banco de dados do resto da aplicacao": [
+    "engenharia-software"
+  ],
+  "quando escrever o teste antes do codigo compensa": [
+    "engenharia-software"
+  ],
+  "como raspar dados de um site e tratar o html": [
+    "python"
+  ],
+  "como funcionam compreensao de lista e gerador": [
+    "python"
+  ],
+  "como prever uma serie com sazonalidade usando suavizacao": [
+    "dados-ml"
+  ],
+  "como equilibrar testar opcao nova e explorar a que ja funciona": [
+    "dados-ml"
+  ],
+  "quando um problema de negocio vale ser resolvido com aprendizado de maquina": [
+    "dados-ml"
+  ],
+  "como treinar uma rede neural para classificar imagens": [
+    "dados-ml"
+  ],
+  "quando usar RAG em vez de ajustar o modelo": [
+    "ia-llm"
+  ],
+  "como medir se a resposta do modelo esta boa": [
+    "ia-llm"
+  ],
+  "como montar um bot de atendimento sem programar do zero": [
+    "ia-llm"
+  ],
+  "o que e mecanismo de atencao num modelo de linguagem": [
+    "ia-llm"
+  ],
+  "como a linguagem controla quem e dono da memoria": [
+    "rust"
+  ],
+  "como guardar estado e reagir a mudanca num componente": [
+    "frontend"
+  ],
+  "qual a diferenca de custo entre os algoritmos de ordenacao": [
+    "matematica"
+  ],
+  "quais sao as leis do marketing de conteudo": [
+    "marketing"
+  ],
+  "o que acontece no cerebro na hora de decidir a compra": [
+    "marketing"
+  ],
+  "como treinar por zona de potencia e achar o limiar": [
+    "treino-endurance"
+  ],
+  "como dividir a temporada em fases de treino": [
+    "treino-endurance"
+  ],
+  "o que comer para aguentar treino longo": [
+    "treino-endurance"
+  ],
+  "qual a diferenca entre pensar rapido por intuicao e devagar com esforco": [
+    "ciencia-cognitiva"
+  ],
+  "como um numero jogado no inicio influencia a estimativa depois": [
+    "ciencia-cognitiva"
+  ],
+  "qual a relacao entre tamanho do grupo social e o cerebro": [
+    "ciencia-cognitiva"
+  ],
+  "como gerar forma visual a partir de regra e algoritmo": [
+    "design-arte"
+  ],
+  "o que distingue arte de artesanato ou entretenimento": [
+    "design-arte"
+  ],
+  "a memoria deveria reconstruir a lembranca em vez de so devolver o trecho guardado": [
+    "agentes-llm"
+  ],
+  "a memoria do agente deveria ser um sistema proprio em vez de um banco de vetor": [
+    "agentes-llm"
+  ],
+  "agente que fica ligado o tempo todo guarda o que, e quem controla isso": [
+    "agentes-llm"
+  ],
+  "as defesas contra injecao de prompt aguentam contexto longo": [
+    "seguranca-llm"
+  ],
+  "chatbot de proposito geral aumenta engajamento de verdade": [
+    "ia-llm"
+  ],
+  "colocar a configuracao da IA em markdown versionado no repositorio muda alguma coisa": [
+    "agentes-llm"
+  ],
+  "como administrar o contexto por programa numa tarefa que dura muito": [
+    "agentes-llm"
+  ],
+  "como aproveitar cache de prompt para baratear o agente": [
+    "agentes-llm"
+  ],
+  "como aproveitar os ciclos da bolsa em investimento de longo prazo": [
+    "financas-investimentos"
+  ],
+  "como avaliar agente de codigo numa sessao com a pessoa interrompendo e corrigindo": [
+    "agentes-llm"
+  ],
+  "como avaliar agente de codigo sem rodar o benchmark inteiro toda vez": [
+    "agentes-llm"
+  ],
+  "como avaliar se uma acao esta barata olhando o balanco da empresa": [
+    "financas-investimentos"
+  ],
+  "como combinar cor usando contraste e circulo cromatico": [
+    "design-arte"
+  ],
+  "como comecar a analisar dado com Python do zero": [
+    "python"
+  ],
+  "como decidir para qual modelo mandar cada pedido": [
+    "ia-llm"
+  ],
+  "como descobrir API que falha calada, sem devolver erro": [
+    "engenharia-software"
+  ],
+  "como envenenar a base de um sistema de recuperacao e como defender": [
+    "seguranca-llm"
+  ],
+  "como escolher e compor tipografia para texto longo": [
+    "design-arte"
+  ],
+  "como escolher o que entra no contexto pensando na decisao que o agente vai tomar": [
+    "agentes-llm"
+  ],
+  "como escolher por qual canal de aquisicao comecar": [
+    "marketing"
+  ],
+  "como escrever documentacao que o agente de codigo consiga usar": [
+    "agentes-llm"
+  ],
+  "como estruturar conteudo e anuncio no Instagram para um negocio": [
+    "marketing"
+  ],
+  "como fazer componente acessivel para quem usa leitor de tela": [
+    "frontend"
+  ],
+  "como fazer o agente repetir o mesmo caminho toda vez que roda": [
+    "agentes-llm"
+  ],
+  "como fazer o outro lado reconhecer que eu entendi a posicao dele numa negociacao": [
+    "vendas"
+  ],
+  "como fazer software em que o dado e do usuario e funciona sem nuvem": [
+    "engenharia-software"
+  ],
+  "como funciona Tesouro Direto e renda fixa no Brasil": [
+    "financas-investimentos"
+  ],
+  "como funciona indice invertido e por que ele e rapido": [
+    "busca-recuperacao"
+  ],
+  "como manter padrao visual entre paginas com componente reaproveitavel": [
+    "frontend"
+  ],
+  "como medir a experiencia de usar um assistente de IA": [
+    "ux-conversao"
+  ],
+  "como montar o ambiente em que o agente age e observa o resultado": [
+    "agentes-llm"
+  ],
+  "como montar uma oferta dificil de recusar sem baixar o preco": [
+    "posicionamento-negocio"
+  ],
+  "como o agente decide por onde comecar a ler um repositorio que ele nao conhece": [
+    "agentes-llm"
+  ],
+  "como organizar o acompanhamento de quem ainda nao respondeu": [
+    "vendas"
+  ],
+  "como organizar um formulario para a pessoa nao desistir no meio": [
+    "ux-conversao"
+  ],
+  "como rodar teste A/B sem chegar a conclusao errada": [
+    "ux-conversao"
+  ],
+  "como saber se meus testes prestam mudando o codigo de proposito": [
+    "engenharia-software"
+  ],
+  "como se faz teste de invasao e exploracao de vulnerabilidade": [
+    "seguranca-ofensiva"
+  ],
+  "como tratar seguranca como propriedade do sistema inteiro e nao de uma peca": [
+    "seguranca-llm"
+  ],
+  "como um plugin de agente e mantido e o que quebra quando o programa hospedeiro muda": [
+    "agentes-llm"
+  ],
+  "como um produto cria habito na pessoa que usa": [
+    "ux-conversao"
+  ],
+  "como um servidor de ferramenta ganha confianca primeiro e vira hostil depois": [
+    "seguranca-llm"
+  ],
+  "como uma biblioteca de habilidades de agente cresce e envelhece com o tempo": [
+    "agentes-llm"
+  ],
+  "como usar Python para escrever ferramenta de seguranca ofensiva": [
+    "seguranca-ofensiva"
+  ],
+  "como usar o Claude Code no dia a dia, comandos e configuracao": [
+    "agentes-llm"
+  ],
+  "como usar o sinal de quem clicou para melhorar o ranking": [
+    "busca-recuperacao"
+  ],
+  "cortar o historico melhora ou piora o agente numa tarefa comprida com ferramenta": [
+    "agentes-llm"
+  ],
+  "da para extrair o raciocinio interno de um modelo fechado pela API": [
+    "seguranca-llm"
+  ],
+  "da para melhorar o modelo depois do treino sem dado rotulado": [
+    "ia-llm"
+  ],
+  "de que jeitos um sistema de agente consegue melhorar a si mesmo": [
+    "agentes-llm"
+  ],
+  "em que etapa da vida do modelo nasce a alucinacao e o que reduz": [
+    "ia-llm"
+  ],
+  "instrucao feita para um desenvolvedor especifico rende mais que instrucao generica": [
+    "agentes-llm"
+  ],
+  "interface gerada por IA cria padrao escuro sozinha": [
+    "ux-conversao"
+  ],
+  "o agente aguenta uma cadeia longa de chamadas de API que dependem uma da outra": [
+    "agentes-llm"
+  ],
+  "o que a pesquisa diz sobre construir marca pessoal": [
+    "posicionamento-negocio"
+  ],
+  "o que acontece com o agente de codigo quando uma dependencia quebra em silencio": [
+    "agentes-llm"
+  ],
+  "o que causou o colapso financeiro de 2008": [
+    "financas-investimentos"
+  ],
+  "o que e margem de seguranca e por que exigir uma": [
+    "financas-investimentos"
+  ],
+  "o que fazer quando todo mundo no mercado ja ouviu a mesma promessa": [
+    "copy-persuasao"
+  ],
+  "o que o excesso de prazer facil faz com o cerebro": [
+    "ciencia-cognitiva"
+  ],
+  "o que os desenvolvedores costumam escrever no arquivo de regras do assistente de codigo": [
+    "agentes-llm"
+  ],
+  "o que quebra quando varios agentes seguros trabalham juntos": [
+    "seguranca-llm"
+  ],
+  "os benchmarks de programacao medem o que o agente faz de verdade no trabalho": [
+    "agentes-llm"
+  ],
+  "os varios programas que rodam agente estao convergindo para a mesma arquitetura": [
+    "agentes-llm"
+  ],
+  "panorama de agente que trabalha dentro da linha de comando": [
+    "agentes-llm"
+  ],
+  "panorama de como se projeta o sistema em volta do modelo para ele executar tarefa": [
+    "agentes-llm"
+  ],
+  "por que defesa que so olha a superficie do texto nao segura vazamento de dado": [
+    "seguranca-llm"
+  ],
+  "por que o fundador deveria se prender ao problema e nao a solucao": [
+    "posicionamento-negocio"
+  ],
+  "por que solucao que nao faz sentido logico as vezes funciona melhor": [
+    "posicionamento-negocio"
+  ],
+  "por que uma instrucao empacotada funciona ate certo ponto e depois para de funcionar": [
+    "agentes-llm"
+  ],
+  "principios classicos de design com nome proprio, tipo regra 80/20 e affordance": [
+    "design-arte"
+  ],
+  "quais sao os pressupostos e os niveis logicos da PNL": [
+    "ciencia-cognitiva"
+  ],
+  "quando a busca por palavra ainda ganha do embedding num RAG grande": [
+    "busca-recuperacao"
+  ],
+  "quanto custa de verdade rodar agente que escreve codigo, contando a conferencia": [
+    "agentes-llm"
+  ],
+  "quanto custa servir um sistema de memoria de agente em producao": [
+    "agentes-llm"
+  ],
+  "que criterios Buffett e Munger usam para escolher em que empresa por dinheiro": [
+    "financas-investimentos"
+  ],
+  "que dado pessoal vaza quando o agente tem acesso as minhas ferramentas": [
+    "seguranca-llm"
+  ],
+  "que diferenca faz acreditar que a habilidade pode ser desenvolvida": [
+    "ciencia-cognitiva"
+  ],
+  "que familias de tecnica de raciocinio existem e como se relacionam": [
+    "ia-llm"
+  ],
+  "que mecanismos de memoria existem para agente autonomo e como medir cada um": [
+    "agentes-llm"
+  ],
+  "que padroes de arquitetura aparecem no codigo-fonte dos agentes de programacao": [
+    "agentes-llm"
+  ],
+  "que perfil de vendedor rende mais em venda complexa": [
+    "vendas"
+  ],
+  "que regras um designer classico impoe a si mesmo": [
+    "design-arte"
+  ],
+  "que superficie de ataque abre quando o agente usa MCP e habilidades de terceiro": [
+    "seguranca-llm"
+  ],
+  "vale montar grafo em varias etapas para responder pergunta de dominio": [
+    "busca-recuperacao"
+  ],
+  "vale o agente escrever codigo para chamar a ferramenta em vez de chamar direto": [
+    "agentes-llm"
+  ],
+  "vale usar roteiro pronto na ligacao de venda": [
+    "vendas"
+  ],
+  "_contaminadas_leia": "Perguntas em que quem escolheu a categoria pode ter visto o alvo: as 14 primeiras por contato direto em 07/09; as 17 de 10/09 porque o titulo do documento apareceu num resultado de busca da propria sessao, ou porque um comentario de dominio.py nomeia o autor. Nas 17, a categoria escrita e o palpite pela pergunta e nao foi trocada depois. Desconte estas ao ler a taxa de acerto de categoria."
+}

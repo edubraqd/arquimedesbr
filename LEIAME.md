@@ -9,14 +9,22 @@ Um PDF é uma parede. O agente que abre um ou gasta a janela de contexto inteira
 Nenhum LLM no processamento. Nenhuma chamada de rede. Nenhuma conta de API. Tudo roda local.
 
 ```bash
-python motor/semantico.py "como responder quando o cliente diz que está caro" --rerank --passagens --categoria vendas
+python motor/consultar.py "como responder quando o cliente diz que está caro" --tambem "price objection" --categoria vendas
 ```
 
 ```
-1. 0,71  Gap Selling / 07-the-problem-identification-chart.md  (p. 112-129)
-   "...the buyer's objection to price is almost never about price. It is about
-    a gap they have not yet quantified..."
+1. +0.712  Gap Selling — The problem identification chart · p.112-129
+   the buyer's objection to price is almost never about price. It is about a gap they have not yet quantified...
+2. +0.655  SPIN Selling — Handling objections · p.117-138
+   ...
+
+sessao a1b2 · rodada 1
+  abrir:      python consultar.py --sessao a1b2 --abrir <n>
+  mais do doc: python consultar.py --sessao a1b2 --mais <n>
+  nao serviu: python consultar.py --sessao a1b2 --sim <n,n> --nao <n,n>
 ```
+
+Seis cartões de ~25 palavras. O agente lê, abre o que quer (`--abrir 1`, ~420 palavras), ou diz quais não serviram e recebe outros seis — sem embutir de novo e sem gastar token. Menos de 1 s por rodada com o [servidor residente](#o-servidor-residente) no ar.
 
 ---
 
@@ -29,10 +37,12 @@ python motor/semantico.py "como responder quando o cliente diz que está caro" -
 - [Adicionar documento](#adicionar-documento)
 - [Buscar](#buscar)
 - [O que foi medido](#o-que-foi-medido)
+- [Consultar barato: cartões primeiro, realimentação depois](#consultar-barato-cartões-primeiro-realimentação-depois)
+- [Onde a busca erra, e contra quem](#onde-a-busca-erra-e-contra-quem)
 - [Usar pelo Claude Code (a skill)](#usar-pelo-claude-code-a-skill)
 - [Ajustar categorias e domínios](#ajustar-categorias-e-domínios)
 - [Limites honestos](#limites-honestos)
-- [Glossário PT ↔ EN](#glossario-pt--en)
+- [Glossário PT ↔ EN](#glossário-pt--en)
 
 ---
 
@@ -146,7 +156,7 @@ Sem Tesseract tudo continua funcionando; o PDF escaneado apenas cai em `falhas/`
 python -m unittest discover -s motor -p "test_*.py"
 ```
 
-102 testes. Não tocam disco nem rede.
+159 testes. Usam só pasta temporária, não baixam modelo e não abrem socket além do loopback em porta livre que os testes do servidor residente usam.
 
 ---
 
@@ -202,13 +212,14 @@ nao-processado/arquivo.pdf
                     Escreve `assunto` e `termos`, refaz o MAPA.md.
 ```
 
-Depois de incluir documento, atualize as camadas derivadas:
+O `processar.py` agora reindexa sozinho depois de mexer no markdown — incremental, atômico (o índice velho fica até o novo estar escrito), com backup. `--sem-indexar` pula e imprime o comando; `--seco` nunca indexa. As outras camadas derivadas continuam separadas:
 
 ```bash
-python semantico.py indexar
 python rotular.py
 python grafear.py
 ```
+
+O índice guarda o mtime de cada capítulo que embutiu. Se algum `.md` em `markdown/` for mais novo que isso, ou não estiver lá, `consultar.py` e `semantico.py` avisam `indice semantico desatualizado (N novos, M alterados)` na stderr e seguem — aviso, não recusa, porque busca em índice um pouco velho ainda é melhor que nenhuma. Índice de antes dessa conferência ganha o carimbo no próximo `indexar`.
 
 O índice semântico é **chaveado por hash do corpo do capítulo, não por mtime**. Isso importa: corrigir categoria ou gravar o campo de idioma reescreve o frontmatter de centenas de arquivos. Por mtime, cada uma dessas revisões mandaria reembutir a base inteira (~40 min de CPU) sem uma palavra de texto ter mudado.
 
@@ -225,6 +236,8 @@ python processar.py --revisar
 
 `--remover` apaga o markdown, manda o original para `removidos/` e registra no manifesto para que ele não volte na próxima rodada. `--revisar` aplica regra nova (idioma, descarte de capítulo) na base inteira em segundos, sem reabrir um PDF sequer.
 
+Desde 16/09/2026 o `--revisar` também **separa a bibliografia do capítulo**. Paper e capítulo técnico terminam com páginas de referências, e cada entrada virava uma passagem competindo com a prosa: medido numa estante, 289 capítulos `util: sim` carregavam 538 mil palavras de referências. `fatiar.separar_referencias` acha o último título `References`/`Bibliography`, segue até o próximo título que não pareça entrada de bibliografia (sem ano, sem `et al.`, sem DOI, sem URL — porque 148 dos 289 tinham apêndice *depois* das referências, que volta para o corpo) e move o bloco para `<capitulo>.referencias.md` com `util: nao`. O capítulo mantém a citação; as referências param de poluir o índice. Nessa estante a passada separou 292.950 palavras em 261 blocos, e 13 capítulos que tinham sido descartados errado como "índice" voltaram.
+
 ---
 
 ## Buscar
@@ -240,7 +253,13 @@ python processar.py --revisar
 
 Depois, nesta ordem:
 
-**1. Semântica com reranker — é o padrão.**
+**1. `consultar.py` — a porta.** Cartão primeiro, janela larga só do cartão escolhido. Escreva a pergunta nos dois idiomas quando a estante for assim: o motor embute as duas strings e roda o BM25 nas duas. Ver [Consultar barato](#consultar-barato-cartões-primeiro-realimentação-depois).
+
+```bash
+python consultar.py "como responder que está caro" --tambem "price objection" --categoria vendas
+```
+
+**2. Semântica com reranker — a forma larga**, quando você já sabe que quer ~420 palavras de vários resultados de uma vez.
 
 ```bash
 python semantico.py "como responder que está caro" --rerank --passagens --categoria vendas
@@ -250,17 +269,17 @@ O `--rerank` custa ~6 s e vale: um cross-encoder lê a pergunta junto com cada t
 
 O `--passagens` é o truque *small-to-big*. A busca compara passagens de 60 palavras — medido, é o tamanho que o modelo separa melhor — mas devolve a **janela de ~420 palavras em volta** do achado, alinhada à fronteira de frase (`--janela N` muda). Normalmente basta para responder sem abrir o capítulo.
 
-**2. BM25 quando o alvo é literal** — sigla, nome próprio, jargão (`FTP`, `useEffect`, `borrow checker`). Aí escreva a consulta **nos dois idiomas**:
+**3. BM25 sozinho quando o alvo é literal** — sigla, nome próprio, jargão (`FTP`, `useEffect`, `borrow checker`). O `consultar.py` já funde o BM25; o `buscar.py` é para quando você quer *só* o acerto lexical. Escreva a consulta **nos dois idiomas**:
 
 ```bash
 python buscar.py "objecao de preco" --tambem "price objection" --n 6 --trechos
 ```
 
-**3. Leia o `INDEX.md` do documento** antes do capítulo — ele tem o sumário com páginas e contagem de palavras.
+**4. Leia o `INDEX.md` do documento** antes do capítulo — ele tem o sumário com páginas e contagem de palavras.
 
-**4. Leia só o capítulo apontado.** Nunca o livro inteiro.
+**5. Leia só o capítulo apontado.** Nunca o livro inteiro.
 
-**5. O grafo, quando a pergunta for de relação** — "o que conecta X e Y", "quem mais fala disso":
+**6. O grafo, quando a pergunta for de relação** — "o que conecta X e Y", "quem mais fala disso":
 
 ```bash
 python grafear.py --ponte "preco"
@@ -269,7 +288,7 @@ python grafear.py
 
 O grafo mede vocabulário compartilhado, não semântica — às vezes agrupa por idioma. Não conclua parentesco de tema só da vizinhança.
 
-**Não use `--hibrido`.** Fundir os dois rankings mede pior que qualquer um sozinho: a fusão dá peso igual a método forte e a método fraco.
+**Sobre fundir BM25 com os vetores.** Uma versão anterior deste LEIAME dizia *não use `--hibrido`*, porque a fusão tinha medido pior que semântico + reranker sozinho. Aquele veredito veio de **12 perguntas em 25 documentos** — abaixo do piso de ruído que este mesmo arquivo avisa. Remedido em 16/09/2026 com 140 perguntas e 178 documentos, fundir os 30 melhores documentos de cada ranking por rank recíproco e reranquear os 6 é o melhor modo, ou empata com o melhor, em hit@3 e hit@6 — então o `consultar.py` faz isso por padrão (`--sem-bm25` desliga). A tabela está na seção seguinte. O `--hibrido` do `semantico.py` nunca foi a mesma coisa — fundia por passagem, sem reranker — e continua não recomendado.
 
 ---
 
@@ -308,7 +327,7 @@ Guardado aqui para ninguém gastar um dia redescobrindo.
 |---|---|
 | **Prever a categoria automaticamente** (`prever_categoria.py`) | 29 → 30/53. A categoria certa é o primeiro palpite em só 52% dos casos, e filtrar por um palpite errado derruba o hit@3 (38 → 35). Deixe um humano — ou o agente, que tem o contexto da conversa — passar `--categoria`. |
 | **e5-large no lugar do MiniLM** | MRR pior, e 127 min de indexação contra 13 |
-| **Híbrido por fusão de rankings** (`--hibrido`) | 0,645 contra 0,713 do semântico + reranker sozinho |
+| **Híbrido por fusão de rankings** (`semantico.py --hibrido`) | 0,645 contra 0,713 do semântico + reranker sozinho — medido em 12 perguntas, que é ruído. **Revertido em 16/09/2026** para a fusão por documento que o `consultar.py` faz; ver [a tabela de 16/09](#desde-16092026-bm25-fundido-dois-idiomas-um-cartão-por-documento). |
 | **Recuperar 1,3 milhão de palavras** (um bug real de extração) | 43 → 44/53. O conteúdo recuperado é real, mas o gabarito não pergunta por ele. Corrigir o acervo não moveu a métrica; direcionar melhor moveu. |
 
 ### O canário de extração
@@ -358,6 +377,40 @@ q' = alfa*q + beta*média(relevantes) - gama*média(não relevantes)
 Rocchio é aritmética de vetores: sem rede, sem token, milissegundos. O vetor da consulta fica em cache na sessão, então a segunda rodada não re-embute a pergunta.
 
 **Duas rodadas, nunca três.** Medido: a rodada 2 leva o hit@1 de 28 para 33 de 53; a rodada 3 não acrescenta nada. Se duas rodadas não acharam, provavelmente a base não cobre a pergunta.
+
+### Desde 16/09/2026: BM25 fundido, dois idiomas, um cartão por documento
+
+Medido em 140 perguntas, categoria escolhida por agente lendo só a pergunta, cross-encoder nos 6 finais (`avaliar_consultar.py`). O índice estava um pouco desatualizado quando rodou, então **compare as linhas entre si, não com as outras tabelas deste arquivo**:
+
+| modo | hit@1 | hit@3 | hit@6 | MRR |
+|---|---|---|---|---|
+| denso, pergunta só em português (o `consultar.py` de antes) | 67 | 107 | 121 | 0,625 |
+| denso, vetor = PT + EN | 72 | 109 | **129** | 0,660 |
+| BM25 bilíngue → rerank | **79** | 112 | 126 | **0,695** |
+| RRF de denso-30 ∪ BM25-30 → rerank 6 | 74 | **114** | 127 | 0,674 |
+| RRF com PT + EN (**o padrão agora**) | 74 | 112 | **129** | 0,674 |
+
+Quatro coisas mudaram no `consultar.py` por causa disso:
+
+- **`--tambem "<a pergunta em inglês>"`.** O motor soma os dois embeddings e roda o BM25 nas duas strings. É o ganho mais barato da estante — +8 em hit@6 a custo zero, porque o agente que escreve a consulta já sabe os dois idiomas e 135 desses 178 documentos são em inglês. Só pule se a estante inteira for de um idioma.
+- **Toda rodada funde os 30 melhores documentos por vetor com os 30 por BM25** por rank recíproco (`fundir_rrf`), e reranqueia os 6. BM25 ganhar o hit@1 num corpus de ~15 M tokens bate com o que *BM25 Wins at Scale* (arXiv 2607.26497) prevê; a fusão segura o hit@6 do lado denso.
+- **A rodada 2 nunca repete documento já mostrado.** O dedup antigo era por passagem: a consulta andava, outro capítulo do mesmo livro virava a melhor passagem dele, e um livro que você acabou de julgar voltava como novidade. Cartão visto é cartão gasto.
+- **`--mais <n>`** lista os outros capítulos do documento do cartão *n*, ranqueados pela consulta atual, numerados para poder abrir. Cobre o caso que o dedup esconderia: livro certo, capítulo errado.
+
+Duas menores: categoria que esgota os candidatos é completada com o domínio dela, avisando; e `--abrir` / `--estado` não carregam mais índice nem modelo — a sessão guarda caminho e posição de cada cartão, o que também a encolheu de 5 MB para 12 KB.
+
+### O servidor residente
+
+Medido em 16/09/2026: cada chamada do `consultar.py` levava 8–19 s, dos quais **~0,4 s eram trabalho** (produto de matriz, BM25, RRF). O resto era carregar o JSON de 80 MB, o `.npz` de 175 MB, o modelo de embedding (3–9 s) e o cross-encoder de 1,1 GB (3 s) — a cada chamada, porque cada chamada é um processo novo.
+
+```bash
+python motor/servidor.py            # fica no ar; Ctrl+C para sair
+python motor/servidor.py --porta 8766
+```
+
+Nada muda para quem chama. O `consultar.py` tenta a porta por 0,1 s antes de carregar qualquer coisa; se o servidor responde, manda o argv e imprime a resposta; senão roda local como sempre e diz na stderr como subir o servidor. `--local` força o caminho antigo; `CONSULTAR_PORTA` ou `--porta` mudam a porta. A rodada cai para menos de 1 s.
+
+É `http.server` da stdlib, uma requisição por vez, só em `127.0.0.1`. Recarrega o índice semântico quando o mtime do arquivo muda e o BM25 quando o arquivo dele muda, então reindexar não pede reinício.
 
 ---
 
@@ -452,6 +505,9 @@ Categoria que existe na base e não está em domínio nenhum entra em **todos** 
 | detecção de título/rodapé, limpeza | `extrair.py` |
 | o que conta como capítulo sem valor | `qualidade.py` |
 | ranking da busca | `buscar.py` (`bm25`, `_PARADAS`) |
+| pool da fusão, cartões por rodada, pesos do Rocchio | `consultar.py` (`POOL`, `PALAVRAS_CARTAO`, `ALFA`/`BETA`/`GAMA`) |
+| o que conta como bloco de bibliografia | `fatiar.py` (`separar_referencias`, `_MARCA_BIBLIO`) |
+| porta do servidor | `servidor.py` / `CONSULTAR_PORTA` |
 | onde fica a base | `raiz.py` |
 
 ---
@@ -462,6 +518,7 @@ Categoria que existe na base e não está em domínio nenhum entra em **todos** 
 - **A classificação por categoria é casamento de palavra-chave, determinística. Erra.** Confie na busca, que varre o texto todo, e não na categoria.
 - **O grafo mede vocabulário compartilhado**, então às vezes agrupa por idioma em vez de por tema.
 - **A primeira indexação é lenta** — cerca de 40 minutos de CPU para ~90 mil passagens. Depois é incremental, e livro novo custa segundos.
+- **Toda chamada de CLI paga 8–19 s de carga de modelo** se o `servidor.py` não estiver no ar. O trabalho em si é menos de meio segundo.
 - **Tudo isso foi feito para a estante de uma pessoa e depois generalizado.** Onde um padrão parecer arbitrário, ele provavelmente codifica uma medição num corpus que não é o seu. Meça de novo.
 
 ---
@@ -489,6 +546,13 @@ O código e os parâmetros estão em português. Não foram renomeados porque re
 | `--janela N` | window size in words |
 | `--trechos` | show snippets |
 | `--tambem` | also query this (second language) |
+| `consultar` | consult (cards, then feedback) |
+| `servidor` | resident server |
+| `--sessao` / `--abrir N` / `--mais N` | session / open card N / more chapters of card N's document |
+| `--sim` / `--nao` | relevant / not relevant (Rocchio) |
+| `--sem-recorte` / `--sem-bm25` / `--sem-rerank` | no filter / no BM25 fusion / no reranker |
+| `--local` / `--porta` | skip the server / server port |
+| `--sem-indexar` | do not reindex after processing |
 | `--n N` | number of results |
 | `--reindexar` / `--refazer` | rebuild index |
 | `--revisar` | re-apply rules without reprocessing |

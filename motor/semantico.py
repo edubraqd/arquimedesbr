@@ -44,6 +44,45 @@ class IndiceEmUso(RuntimeError):
     pass
 
 
+def _processo_vivo(pid: int) -> bool:
+    """Existe um processo com esse PID? Sem matar ninguem.
+
+    No Windows `os.kill(pid, 0)` NAO e uma sonda: qualquer sinal fora de
+    CTRL_C/CTRL_BREAK vira TerminateProcess. Por isso a consulta e feita por
+    OpenProcess com o direito minimo. PID reaproveitado por outro programa
+    passa por vivo -- erra para o lado de recusar, que e o lado barato.
+    """
+    if os.name == "nt":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        alca = k32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not alca:
+            return k32.GetLastError() == 5          # ERROR_ACCESS_DENIED: existe, de outro usuario
+        try:
+            codigo = ctypes.c_ulong()
+            if k32.GetExitCodeProcess(alca, ctypes.byref(codigo)):
+                return codigo.value == 259           # STILL_ACTIVE
+            return True
+        finally:
+            k32.CloseHandle(alca)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _trava_orfa(trava: Path) -> int | None:
+    """PID gravado na trava, se o processo ja morreu; senao None."""
+    try:
+        pid = int(trava.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    return None if _processo_vivo(pid) else pid
+
+
 @contextlib.contextmanager
 def travar(raiz: Path):
     """Uma indexacao por vez.
@@ -52,15 +91,31 @@ def travar(raiz: Path):
     .npz no meio da escrita da primeira: `BadZipFile`, indice de 151 MB
     inutilizado e 40 min de CPU para refazer. O_EXCL e a checagem barata que
     evita repetir isso.
+
+    Em 16/09/2026 o inverso: o `indexar` morreu junto com a sessao que o
+    lancou e a trava ficou. A trava guarda o PID de quem a criou; se esse
+    processo nao existe mais, ela e orfa e e assumida, avisando na stderr.
     """
     trava = raiz / ARQ_TRAVA
     try:
         fd = os.open(trava, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
-        raise IndiceEmUso(
-            f"ja existe uma indexacao em andamento ({trava}).\n"
-            f"    Se nenhuma estiver rodando, apague o arquivo e tente de novo."
-        ) from None
+        morto = _trava_orfa(trava)
+        if morto is None:
+            raise IndiceEmUso(
+                f"ja existe uma indexacao em andamento ({trava}).\n"
+                f"    Se nenhuma estiver rodando, apague o arquivo e tente de novo."
+            ) from None
+        print(f"aviso: trava orfa do processo {morto}, que nao existe mais: "
+              f"assumindo", file=sys.stderr)
+        with contextlib.suppress(OSError):
+            trava.unlink()
+        try:
+            fd = os.open(trava, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            raise IndiceEmUso(
+                f"outra indexacao pegou a trava ({trava}) neste instante."
+            ) from None
     try:
         os.write(fd, str(os.getpid()).encode())
         os.close(fd)
@@ -229,19 +284,28 @@ def indexar(raiz: Path, refazer: bool = False,
     # reembutir a base inteira (~40 min de CPU) sem uma palavra de texto ter
     # mudado. Por hash do corpo, essa revisao custa zero embedding.
     arquivos = _arquivos(raiz)
-    atuais, corpos, campos_por_arq, metas = {}, {}, {}, {}
+    atuais, corpos, campos_por_arq, metas, mtimes = {}, {}, {}, {}, {}
     for p in arquivos:
         rel = str(p.relative_to(raiz)).replace("\\", "/")
         bruto = ler_capitulo(p)
         if bruto is None:
             continue
+        mtimes[rel] = p.stat().st_mtime
         corpo = _corpo(bruto)
         campos = _frontmatter(bruto)
         atuais[rel] = hashlib.sha1(corpo.encode("utf-8")).hexdigest()[:16]
         corpos[rel] = (bruto, corpo)
         campos_por_arq[rel] = campos
         metas[rel] = _assinatura_meta(campos)
-    mudaram = [c for c, h in atuais.items() if hashes_antigos.get(c) != h]
+    # Capitulo que voltou a ser `util: sim` (processar.py --revisar) tem o
+    # mesmo hash de corpo e nenhuma passagem no indice: pelo hash "nao mudou",
+    # pelo metadado so releria passagens que nao existem. Medido em 16/09:
+    # 10 capitulos (70k palavras) reabilitados nunca entraram. Entra aqui.
+    indexados = {p["caminho"] for p in passagens_antigas}
+    mudaram = [c for c, h in atuais.items()
+               if hashes_antigos.get(c) != h
+               or (c not in indexados and campos_por_arq[c].get("util") != "nao"
+                   and corpos[c][1].strip())]
     sumiram = [c for c in hashes_antigos if c not in atuais]
 
     # Metadado muda sem o corpo mudar: corrigir um titulo, trocar o idioma,
@@ -256,6 +320,13 @@ def indexar(raiz: Path, refazer: bool = False,
 
     if not mudaram and not sumiram and not meta_mudou and vetores_antigos is not None:
         print(f"nada mudou - {len(passagens_antigas)} passagens no indice")
+        if antigo.get("mtimes") != mtimes:
+            # so o carimbo de disco (ver `conferir`): --revisar reescreve
+            # frontmatter sem mudar corpo; sem isto a consulta avisaria
+            # "desatualizado" ate alguem embutir alguma coisa
+            antigo["mtimes"] = mtimes
+            escrever_atomico(meta_path, lambda p: p.write_text(
+                json.dumps(antigo, ensure_ascii=False), encoding="utf-8"))
         return antigo
 
     if not mudaram and not sumiram:
@@ -317,7 +388,7 @@ def indexar(raiz: Path, refazer: bool = False,
     passagens = mantidas + novas
 
     meta = {"modelo": MODELO, "contexto": contexto, "hashes": atuais,
-            "metas": metas, "passagens": passagens}
+            "metas": metas, "mtimes": mtimes, "passagens": passagens}
     # vetores primeiro: se a troca do meta falhar, o .npz novo ainda casa com o
     # meta velho pelos hashes, e a rodada seguinte reconstroi so a diferenca
     escrever_atomico(vet_path, lambda p: np.savez_compressed(p, v=todos))
@@ -333,6 +404,29 @@ def carregar(raiz: Path):
         return None, None
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     return meta, np.load(vet_path)["v"]
+
+
+def conferir(raiz: Path, meta: dict) -> str | None:
+    """Aviso se o disco mudou desde que o indice foi escrito; None se em dia.
+
+    Compara o mtime de cada .md com o carimbo gravado em `indexar` (0,2 s
+    para 3.200 arquivos). Em 14/09 um A/B deixou o indice orfao -- 6.412
+    passagens apontando para arquivo inexistente, 90 capitulos util:sim fora
+    da busca -- e ninguem viu por dois dias. Indice antigo, sem carimbo,
+    nao acusa nada: a proxima indexacao grava o carimbo.
+    """
+    gravados = meta.get("mtimes")
+    if gravados is None:
+        return None
+    atuais = {str(p.relative_to(raiz)).replace("\\", "/"): p.stat().st_mtime
+              for p in _arquivos(raiz)}
+    novos = sum(1 for c in atuais if c not in gravados)
+    sumidos = sum(1 for c in gravados if c not in atuais)
+    alterados = sum(1 for c, m in atuais.items() if c in gravados and gravados[c] != m)
+    if not (novos or sumidos or alterados):
+        return None
+    return (f"indice semantico desatualizado ({novos} novo(s), {alterados} "
+            f"alterado(s), {sumidos} sumido(s)) - rode: python semantico.py indexar")
 
 
 def texto_da_passagem(raiz: Path, p: dict) -> str:

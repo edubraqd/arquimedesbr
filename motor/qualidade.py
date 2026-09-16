@@ -116,19 +116,32 @@ def detectar_tipo(titulo: str, amostra: str) -> str:
 # ------------------------------------------------------- capitulo sem valor
 
 _TITULOS_LIXO = re.compile(
-    r"^\W*("
+    # prefixo numerico ou de letra ("5. References", "A. Bibliografia",
+    # "### 8. References"): medido em 16/09, escondia a secao de apoio
+    r"^\W*(?:(?:\d{1,2}(?:\.\d+)*|[A-Z])[\.\):]?\s+)?("
     r"copyright|creditos|cr[eé]ditos|about this ebook|sobre este|dedicat|dedicac|"
     r"acknowledg|agradecim|table of contents|contents|sumario|sum[áa]rio|indice|"
-    r"[ií]ndice|index|bibliograf|references|refer[eê]ncias|colophon|"
+    r"[ií]ndice|bibliogra|references|refer[eê]ncias|colophon|"
     r"ficha catalografica|isbn|page de titre|title page|half title|"
     r"series editor foreword|foreword|epigraph|errata|notas de rodape|"
     r"advance praise|praise for|what people are saying|elogios|"
-    r"sobre o autor|about the author|acerca del autor|nota do tradutor"
-    # sem \b no fim: as entradas sao prefixos de proposito ("bibliograf" tem de
-    # pegar "Bibliografia", "acknowledg" tem de pegar "Acknowledgements")
+    r"sobre o autor|about the author|acerca del autor|nota do tradutor|"
+    r"(?:author|subject|name) index|"
+    # "index" so como titulo inteiro ("Index", "Index of terms", "Index (parte
+    # 1/2)"): "Index construction" e "Index compression" sao capitulos 4 e 5
+    # do Introduction to Information Retrieval e estavam fora da busca
+    r"index(?:\s+of\b|\s*\(parte|\s*$)"
+    # sem \b no fim: as entradas sao prefixos de proposito ("bibliogra" pega
+    # "Bibliografia" e "Bibliography", "acknowledg" pega "Acknowledgements")
     r")",
     re.IGNORECASE,
 )
+
+# Pagina de venda e UMA pagina (capa de curso pirata, landing de test bank).
+# Medido em 16/09: a unica real na base tem 659 palavras; os 11 capitulos
+# descartados por "add to cart" tinham 6,3k-10k palavras e falavam de botao
+# de e-commerce (AI-Powered Search cap. 1 e 8, Modular Web Design 3-6).
+MAX_PALAVRAS_PAGINA_DE_VENDA = 1500
 
 # marcadores de PDF que nao e o livro: pagina de venda, capa de curso pirata
 _MARCAS_VENDA = (
@@ -154,7 +167,7 @@ def avaliar(titulo: str, md: str):
 
     baixo = corpo.lower()
     achadas = [m for m in _MARCAS_VENDA if m in baixo]
-    if achadas:
+    if achadas and len(palavras) <= MAX_PALAVRAS_PAGINA_DE_VENDA:
         return False, "pagina de venda, nao conteudo (" + ", ".join(achadas[:2]) + ")"
 
     # sumario com pontilhado ("Hierarquia e tudo . . . . . 54"): a regra por

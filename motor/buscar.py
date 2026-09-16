@@ -85,10 +85,13 @@ def _frontmatter(texto: str) -> dict:
 
 def construir_indice(raiz: Path) -> dict:
     raiz_md = raiz / "markdown"
-    docs = []
+    docs, vistos = [], {}
     for caminho in sorted(raiz_md.rglob("*.md")):
         if caminho.name == "INDEX.md":
             continue
+        # todo arquivo varrido entra em `vistos`, mesmo o que nao vira doc:
+        # e contra ele que `_mudou` compara (ver la o motivo)
+        vistos[str(caminho.relative_to(raiz)).replace("\\", "/")] = caminho.stat().st_mtime
         texto = ler_capitulo(caminho)
         if texto is None:
             continue
@@ -115,17 +118,25 @@ def construir_indice(raiz: Path) -> dict:
     for d in docs:
         df.update(d["tf"].keys())
     return {"docs": docs, "df": dict(df), "total": len(docs),
-            "media": (sum(d["n"] for d in docs) / len(docs)) if docs else 0}
+            "media": (sum(d["n"] for d in docs) / len(docs)) if docs else 0,
+            "arquivos": vistos}
 
 
 def _mudou(raiz: Path, indice: dict) -> bool:
+    """Algum .md apareceu, sumiu ou mudou desde que o indice foi escrito?
+
+    Compara com `arquivos` (tudo que foi varrido), nao com `docs`. Medido em
+    16/09/2026: os 139 capitulos `util: nao` nunca entram em `docs`, entao a
+    comparacao antiga via 3.207 arquivos contra 3.068 e reconstruia o indice
+    de 51 MB -- 159 s -- em toda consulta, desde sempre. Indice antigo, sem
+    `arquivos`, reconstroi uma vez e passa a guardar.
+    """
     atuais = {
         str(p.relative_to(raiz)).replace("\\", "/"): p.stat().st_mtime
         for p in (raiz / "markdown").rglob("*.md")
         if p.name != "INDEX.md"
     }
-    antigos = {d["caminho"]: d["mtime"] for d in indice.get("docs", [])}
-    return atuais != antigos
+    return atuais != indice.get("arquivos")
 
 
 def carregar_indice(raiz: Path, forcar: bool = False) -> dict:

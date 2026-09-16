@@ -6,6 +6,8 @@ capitulo dentro de `markdown/<categoria>/<documento>/`, move o original para
 
     python processar.py                 # processa a fila inteira
     python processar.py --seco          # mostra o que faria, nao escreve nada
+    # --seco vale tambem para --mover e --remover. Ate 10/09/2026 nao valia:
+    # a previa movia a pasta de verdade, e a de --remover apagava o markdown.
     python processar.py --limite 3      # so os 3 primeiros
     python processar.py --reprocessar   # refaz mesmo o que ja esta no manifesto
     python processar.py --status        # o que tem na base hoje
@@ -27,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import catalogar  # noqa: E402
 import extrair as extracao  # noqa: E402
 import qualidade  # noqa: E402
-from fatiar import fatiar, slug  # noqa: E402
+import semantico  # noqa: E402
+from fatiar import fatiar, separar_referencias, slug  # noqa: E402
 
 from raiz import RAIZ_PADRAO  # noqa: E402
 # Corte de "nao vale a pena": PDF escaneado da 0 palavras/pagina. Livro com
@@ -172,14 +175,38 @@ def processar_um(caminho: Path, raiz: Path, manifesto: dict, usar_ocr: bool,
     return "ok"
 
 
+def _indexar_depois(raiz: Path, args) -> None:
+    """Mexeu no markdown, reindexa na hora -- salvo --seco ou --sem-indexar.
+
+    Ate 16/09 so avisava, e o aviso foi ignorado: indice orfao de 14 a 16/09.
+    Outra indexacao em curso (trava) volta a ser aviso, nao erro.
+    """
+    if args.seco or args.sem_indexar:
+        _avisar_indice()
+        return
+    print("\nreindexando o indice semantico...")
+    try:
+        semantico.indexar(raiz)
+    except semantico.IndiceEmUso as e:
+        print(f"  {e}")
+        _avisar_indice()
+
+
 def _avisar_indice(quantos: int = 0) -> None:
     """Mover ou remover documento deixa o indice semantico apontando para o vazio.
 
     O indice guarda o caminho de cada passagem, e nem `--mover` nem `--remover`
     o reescrevem. Medido em 07/09: 4 documentos movidos bastaram para 9.185
     passagens (8,7%) ficarem orfas, e as consultas com `--rerank` morriam com
-    FileNotFoundError. Reindexar e barato porque a chave e o hash do corpo -
-    nada e reembutido, so os caminhos sao reescritos.
+    FileNotFoundError.
+
+    **Reindexar depois de mover NAO e barato**, ao contrario do que este aviso
+    dizia: o cache de `semantico.indexar` e chaveado pelo **caminho relativo**
+    (`atuais[rel]`), nao pelo hash do corpo, entao arquivo movido entra como
+    arquivo novo. Medido em 10/09/2026: mover 12 documentos virou "85 novos, 85
+    sumidos" e **3.951 passagens reembutidas**, ~3 min. O hash do corpo economiza
+    no caso em que o caminho nao muda -- e o do `--revisar`, que mexe so no
+    frontmatter e de fato custa zero embedding.
     """
     print()
     print("o indice semantico ficou desatualizado. rode:")
@@ -222,7 +249,8 @@ def _julgar_extracao(palavras: int, cru: int, minimo: float = 0.80):
     )
 
 
-def recategorizar(raiz: Path, manifesto: dict, pasta: str, nova: str) -> int:
+def recategorizar(raiz: Path, manifesto: dict, pasta: str, nova: str,
+                  seco: bool = False) -> int:
     """Corrige a categoria de um documento ja processado.
 
     A classificacao automatica e por palavra-chave e erra; a curadoria manual
@@ -245,6 +273,10 @@ def recategorizar(raiz: Path, manifesto: dict, pasta: str, nova: str) -> int:
     antiga = item["categoria"]
     if antiga == nova:
         print("ja esta nessa categoria")
+        return 0
+
+    if seco:
+        print(f"{item['titulo']}: {antiga} -> {nova} (seco: nada escrito)")
         return 0
 
     origem = raiz / "markdown" / antiga / pasta
@@ -272,7 +304,6 @@ def recategorizar(raiz: Path, manifesto: dict, pasta: str, nova: str) -> int:
     catalogar.salvar_manifesto(raiz / "manifesto.json", manifesto)
     catalogar.gerar_indice(raiz, manifesto)
     print(f"{item['titulo']}: {antiga} -> {nova}")
-    _avisar_indice()
     return 0
 
 
@@ -295,16 +326,46 @@ def _reescrever_frontmatter(md: Path, novos: dict) -> None:
     md.write_text(cabeca + texto[fim + 4:], encoding="utf-8")
 
 
+def _separar_referencias_existentes(md: Path, campos: dict, corpo: str,
+                                    seco: bool) -> int:
+    """Aplica `fatiar.separar_referencias` a um capitulo ja gravado.
+
+    A bibliografia vai para `<nome>.referencias.md`, mesmo frontmatter e
+    `util: nao`; o capitulo perde o bloco (o hash do corpo muda e o
+    `semantico.py indexar` reembute so ele). Devolve as palavras movidas.
+    Idempotente: na segunda passada nao ha bloco para cortar.
+    """
+    if md.name.endswith(".referencias.md") or campos.get("util") == "nao":
+        return 0
+    corte = separar_referencias(corpo)
+    if not corte:
+        return 0
+    novo_corpo, bloco = corte
+    if not seco:
+        cabeca = md.read_text(encoding="utf-8")
+        fim = cabeca.find("\n---", 3)
+        cabeca = cabeca[:fim + 4]
+        md.write_text(cabeca + "\n" + novo_corpo + "\n", encoding="utf-8")
+        destino = md.with_name(md.stem + ".referencias.md")
+        destino.write_text(cabeca + "\n" + bloco + "\n", encoding="utf-8")
+        _reescrever_frontmatter(destino, {
+            "capitulo": f"{campos.get('capitulo', md.stem)} / Referencias",
+            "util": "nao", "motivo_descarte": "referencias separadas do capitulo"})
+    return len(bloco.split())
+
+
 def revisar(raiz: Path, manifesto: dict, seco: bool = False) -> int:
     """Recalcula idioma e utilidade sobre o markdown que ja existe.
 
     Serve para aplicar regra nova sem reabrir PDF: extrair e fatiar sao a parte
-    cara, e nada neles mudou. Uma passada completa leva segundos.
+    cara, e nada neles mudou. Uma passada completa leva segundos. Desde 16/09
+    tambem separa a bibliografia que ficou dentro de capitulo de conteudo.
     """
     mudou_arquivo = 0
     por_pasta = {i["pasta"]: (d, i) for d, i in manifesto.items()
                  if i.get("status") == "ok" and i.get("pasta")}
     descartados_total = 0
+    referencias_movidas = 0
 
     for pasta, (digest, item) in sorted(por_pasta.items()):
         dir_doc = raiz / "markdown" / item["categoria"] / pasta
@@ -326,6 +387,12 @@ def revisar(raiz: Path, manifesto: dict, seco: bool = False) -> int:
                     corpo = bruto[fim + 4:]
             titulo_cap = campos.get("capitulo", md.stem)
             util, motivo = qualidade.avaliar(titulo_cap, corpo)
+            if util:
+                movidas = _separar_referencias_existentes(md, campos, corpo, seco)
+                if movidas:
+                    referencias_movidas += movidas
+                    mudou_arquivo += 1
+                    corpo = separar_referencias(corpo)[0]
             if not util:
                 descartados.append((md.name, motivo))
                 # o rosto costuma ser descartado como apoio, mas e justamente
@@ -373,12 +440,14 @@ def revisar(raiz: Path, manifesto: dict, seco: bool = False) -> int:
         catalogar.salvar_manifesto(raiz / "manifesto.json", manifesto)
         catalogar.gerar_indice(raiz, manifesto)
     print(f"\n{len(por_pasta)} documentos revisados, {descartados_total} capitulos "
-          f"fora da busca, {mudou_arquivo} arquivos atualizados"
+          f"fora da busca, {mudou_arquivo} arquivos atualizados, "
+          f"{referencias_movidas} palavras de referencias separadas"
           + (" (seco: nada escrito)" if seco else ""))
     return 0
 
 
-def remover(raiz: Path, manifesto: dict, pasta: str, motivo: str) -> int:
+def remover(raiz: Path, manifesto: dict, pasta: str, motivo: str,
+            seco: bool = False) -> int:
     """Tira um documento da base.
 
     O markdown e apagado (regeneravel a partir do PDF), o original vai para
@@ -396,6 +465,14 @@ def remover(raiz: Path, manifesto: dict, pasta: str, motivo: str) -> int:
 
     digest, item = alvo
     md = raiz / "markdown" / item["categoria"] / pasta
+
+    if seco:
+        print(f"removeria: {item['titulo']}")
+        print(f"  motivo:   {motivo}")
+        print(f"  markdown: {md} ({item.get('capitulos', '?')} capitulos)")
+        print("  (seco: nada apagado)")
+        return 0
+
     if md.exists():
         shutil.rmtree(md)
 
@@ -416,7 +493,6 @@ def remover(raiz: Path, manifesto: dict, pasta: str, motivo: str) -> int:
     print(f"  motivo:   {motivo}")
     print(f"  markdown: apagado ({item.get('capitulos', '?')} capitulos)")
     print(f"  original: {destino if destino else 'nao estava em processado/'}")
-    _avisar_indice()
     return 0
 
 
@@ -457,6 +533,8 @@ def main() -> int:
     ap.add_argument("--motivo", default="removido na curadoria")
     ap.add_argument("--revisar", action="store_true",
                     help="recalcula idioma e utilidade sem reabrir PDF")
+    ap.add_argument("--sem-indexar", action="store_true",
+                    help="nao encadeia semantico.indexar no fim (so avisa)")
     args = ap.parse_args()
 
     raiz = args.raiz
@@ -467,14 +545,25 @@ def main() -> int:
         status(raiz, manifesto)
         return 0
     if args.revisar:
-        return revisar(raiz, manifesto, seco=args.seco)
+        codigo = revisar(raiz, manifesto, seco=args.seco)
+        if codigo == 0:
+            _indexar_depois(raiz, args)
+        return codigo
     if args.remover:
-        return remover(raiz, manifesto, args.remover, args.motivo)
+        codigo = remover(raiz, manifesto, args.remover, args.motivo,
+                         seco=args.seco)
+        if codigo == 0:
+            _indexar_depois(raiz, args)
+        return codigo
     if args.mover:
         if not args.para:
             print("--mover exige --para <categoria>")
             return 1
-        return recategorizar(raiz, manifesto, args.mover, args.para)
+        codigo = recategorizar(raiz, manifesto, args.mover, args.para,
+                               seco=args.seco)
+        if codigo == 0:
+            _indexar_depois(raiz, args)
+        return codigo
     if args.so_indice:
         catalogar.gerar_indice(raiz, manifesto)
         print(f"indice reescrito: {raiz / 'INDEX.md'}")
@@ -524,6 +613,8 @@ def main() -> int:
     print("\nresumo: " + ", ".join(f"{k}={v}" for k, v in sorted(placar.items())))
     if not args.seco:
         print(f"indice: {raiz / 'INDEX.md'}")
+    if placar.get("ok"):
+        _indexar_depois(raiz, args)
     return 0
 
 

@@ -9,14 +9,22 @@ A PDF is a wall. An agent that opens one either blows its context window on 400 
 No LLM in the pipeline. No network calls. No API bill. Everything runs locally.
 
 ```bash
-python motor/semantico.py "how do I answer when the client says it is too expensive" --rerank --passagens --categoria vendas
+python motor/consultar.py "how do I answer when the client says it is too expensive" --tambem "price objection" --categoria vendas
 ```
 
 ```
-1. 0.71  Gap Selling / 07-the-problem-identification-chart.md  (p. 112-129)
-   "...the buyer's objection to price is almost never about price. It is about
-    a gap they have not yet quantified..."
+1. +0.712  Gap Selling — The problem identification chart · p.112-129
+   the buyer's objection to price is almost never about price. It is about a gap they have not yet quantified...
+2. +0.655  SPIN Selling — Handling objections · p.117-138
+   ...
+
+sessao a1b2 · rodada 1
+  abrir:      python consultar.py --sessao a1b2 --abrir <n>
+  mais do doc: python consultar.py --sessao a1b2 --mais <n>
+  nao serviu: python consultar.py --sessao a1b2 --sim <n,n> --nao <n,n>
 ```
+
+Six cards of ~25 words. The agent reads them, opens the one it wants (`--abrir 1`, ~420 words), or tells the engine which ones did not serve and gets six others — with no new embedding and no tokens spent. Under 1 s per round with the [resident server](#the-resident-server) up.
 
 ---
 
@@ -29,6 +37,8 @@ python motor/semantico.py "how do I answer when the client says it is too expens
 - [Adding documents](#adding-documents)
 - [Searching](#searching)
 - [What was measured](#what-was-measured)
+- [Consulting cheaply: cards first, then feedback](#consulting-cheaply-cards-first-then-feedback)
+- [Where the search fails, and to what](#where-the-search-fails-and-to-what)
 - [Using it from Claude Code (the skill)](#using-it-from-claude-code-the-skill)
 - [Customizing categories and domains](#customizing-categories-and-domains)
 - [Honest limits](#honest-limits)
@@ -145,7 +155,7 @@ Without Tesseract everything still works; a scanned PDF simply lands in `falhas/
 python -m unittest discover -s motor -p "test_*.py"
 ```
 
-102 tests. They touch neither disk nor network.
+159 tests. They use temporary folders only, download no model, and open no socket except the loopback one the resident-server tests bind on a free port.
 
 ---
 
@@ -199,13 +209,14 @@ nao-processado/file.pdf
                     book. Writes `assunto` and `termos`, rebuilds MAPA.md.
 ```
 
-After adding documents, refresh the derived layers:
+`processar.py` now reindexes on its own after touching the markdown — incremental, atomic (the old index stays until the new one is written), with a backup. `--sem-indexar` skips it and prints the command instead; `--seco` never indexes. The other derived layers are still separate:
 
 ```bash
-python semantico.py indexar
 python rotular.py
 python grafear.py
 ```
+
+The index records the mtime of every chapter it embedded. If any `.md` under `markdown/` is newer than that, or is missing from it, `consultar.py` and `semantico.py` print `indice semantico desatualizado (N novos, M alterados)` on stderr and carry on — a warning, not a refusal, because a search on a slightly stale index is still better than none. An index built before this check gets its stamp on the next `indexar`.
 
 The semantic index is **keyed by a hash of the chapter body, not mtime**. That matters: fixing a category or writing a language field rewrites the frontmatter of hundreds of files. Keyed by mtime, each such fix would re-embed the whole library (~40 min of CPU) without a single word of text having changed.
 
@@ -222,6 +233,8 @@ python processar.py --revisar
 
 `--remover` deletes the markdown, moves the original to `removidos/`, and records it in the manifest so it does not come back on the next run. `--revisar` applies new rules (language detection, chapter discards) across the whole library in seconds, without reopening a single PDF.
 
+Since 2026-09-16 `--revisar` also **cuts the bibliography out of each chapter**. A paper or a technical chapter ends with pages of references, and every entry became a passage competing with the prose: measured on one shelf, 289 `util: sim` chapters carried 538k words of references. `fatiar.separar_referencias` finds the last `References`/`Bibliography` heading, keeps going until the next heading that does not look like a bibliography entry (no year, no `et al.`, no DOI, no URL — because 148 of the 289 had an appendix *after* the references that belongs back in the body), and moves the block to `<chapter>.referencias.md` with `util: nao`. The chapter keeps its citation; the references stop polluting the index. On that shelf the pass separated 292,950 words in 261 blocks and 13 chapters that had been wrongly discarded as "index" came back.
+
 ---
 
 ## Searching
@@ -237,7 +250,13 @@ python processar.py --revisar
 
 Then, in order:
 
-**1. Semantic + reranker — the default.**
+**1. `consultar.py` — the door.** Cards first, the wide window only for the card you pick. Write the question in both languages when the shelf is: the engine embeds both strings and runs BM25 in both. See [Consulting cheaply](#consulting-cheaply-cards-first-then-feedback).
+
+```bash
+python consultar.py "how to answer that it is too expensive" --tambem "price objection" --categoria vendas
+```
+
+**2. Semantic + reranker — the wide form**, when you already know you want ~420 words for several results at once.
 
 ```bash
 python semantico.py "how to answer that it is too expensive" --rerank --passagens --categoria vendas
@@ -247,17 +266,17 @@ python semantico.py "how to answer that it is too expensive" --rerank --passagen
 
 `--passagens` is the small-to-big trick. Search compares 60-word passages — measured to be the size the model separates best — but returns the **~420-word window around the hit**, aligned to sentence boundaries (`--janela N` changes it). You usually get the answer without opening the chapter at all.
 
-**2. BM25 when the target is literal** — an acronym, a proper noun, jargon (`FTP`, `useEffect`, `borrow checker`). Query in **both languages**:
+**3. BM25 alone when the target is literal** — an acronym, a proper noun, jargon (`FTP`, `useEffect`, `borrow checker`). `consultar.py` already fuses BM25 in; `buscar.py` is for when you want *only* the lexical hits. Query in **both languages**:
 
 ```bash
 python buscar.py "objecao de preco" --tambem "price objection" --n 6 --trechos
 ```
 
-**3. Read the document's `INDEX.md`** before the chapter — it has the table of contents with page numbers and word counts.
+**4. Read the document's `INDEX.md`** before the chapter — it has the table of contents with page numbers and word counts.
 
-**4. Read only the chapter the search pointed at.** Never the whole book.
+**5. Read only the chapter the search pointed at.** Never the whole book.
 
-**5. The graph, for questions about relations** — "what connects X and Y", "who else talks about this":
+**6. The graph, for questions about relations** — "what connects X and Y", "who else talks about this":
 
 ```bash
 python grafear.py --ponte "pricing"
@@ -266,7 +285,7 @@ python grafear.py
 
 The graph measures shared vocabulary, not semantics — it will sometimes cluster by language. Do not read kinship into mere adjacency.
 
-**Do not use `--hibrido`.** Fusing the two rankings measures worse than either one alone: fusion gives equal weight to a strong and a weak method.
+**On fusing BM25 with the vectors.** An earlier version of this README said *do not use `--hibrido`*, because fusion had measured worse than semantic+rerank alone. That verdict came from **12 questions over 25 documents** — below the noise floor this same README warns about. Re-measured on 2026-09-16 with 140 questions and 178 documents, fusing the top-30 documents of each ranking by reciprocal rank and reranking the top 6 is the best or tied-best mode on hit@3 and hit@6, so `consultar.py` does it by default (`--sem-bm25` turns it off). The table is in the next section. The `--hibrido` flag of `semantico.py` was never the same thing — it fused at passage level, with no reranker — and it is still not recommended.
 
 ---
 
@@ -305,7 +324,7 @@ Kept here so nobody spends a day rediscovering it.
 |---|---|
 | **Auto-predicting the category** (`prever_categoria.py`) | 29 to 30/53. The right category is the top guess only 52% of the time, and filtering on a wrong guess drops hit@3 (38 to 35). Let a human — or the agent, which has conversation context — pass `--categoria`. |
 | **e5-large instead of MiniLM** | worse MRR, and 127 min to index versus 13 |
-| **Hybrid rank fusion** (`--hibrido`) | 0.645 versus 0.713 for semantic+rerank alone |
+| **Hybrid rank fusion** (`semantico.py --hibrido`) | 0.645 versus 0.713 for semantic+rerank alone — measured on 12 questions, which is noise. **Reversed on 2026-09-16** for the document-level fusion `consultar.py` does; see [the 16/09 table](#since-2026-09-16-bm25-fused-both-languages-one-card-per-document). |
 | **Recovering 1.3M lost words** (a real extraction bug) | 43 to 44/53. The recovered content is real, but the ground truth does not ask about it. Fixing the corpus did not move the metric; better targeting did. |
 
 ### The extraction canary
@@ -355,6 +374,40 @@ q' = alpha*q + beta*mean(relevant) - gamma*mean(non-relevant)
 Rocchio is vector arithmetic: no network, no tokens, milliseconds. The query vector is cached in the session, so a second round does not re-embed the question.
 
 **Two rounds, never three.** Measured: round 2 lifts hit@1 from 28 to 33 of 53; round 3 adds nothing. If two rounds have not found it, the library probably does not cover the question.
+
+### Since 2026-09-16: BM25 fused, both languages, one card per document
+
+Measured on 140 questions, category chosen by an agent reading only the question, cross-encoder on the final 6 (`avaliar_consultar.py`). The index was slightly stale when this ran, so **compare rows with each other, not with other tables in this file**:
+
+| mode | hit@1 | hit@3 | hit@6 | MRR |
+|---|---|---|---|---|
+| dense, query in Portuguese only (the old `consultar.py`) | 67 | 107 | 121 | 0.625 |
+| dense, vector = PT + EN | 72 | 109 | **129** | 0.660 |
+| BM25 bilingual → rerank | **79** | 112 | 126 | **0.695** |
+| RRF of dense-30 ∪ BM25-30 → rerank 6 | 74 | **114** | 127 | 0.674 |
+| RRF with PT + EN (**the default now**) | 74 | 112 | **129** | 0.674 |
+
+Four things changed in `consultar.py` because of it:
+
+- **`--tambem "<the question in English>"`.** The engine sums the two embeddings and runs BM25 on both strings. It is the cheapest gain on the shelf — +8 on hit@6 for zero cost, because the agent writing the query already knows both languages and 135 of these 178 documents are in English. Skip it only if your whole shelf is in one language.
+- **Every round fuses the top-30 documents by vector with the top-30 by BM25** through reciprocal rank (`fundir_rrf`), then reranks the 6. That BM25 wins hit@1 outright on a ~15M-token corpus matches what *BM25 Wins at Scale* (arXiv 2607.26497) predicts; the fusion keeps the dense side's hit@6.
+- **Round 2 never repeats a document already shown.** The old dedup was per passage: after the query moved, another chapter of the same book became its best passage and a book you had just judged came back as news. A card seen is a card spent.
+- **`--mais <n>`** lists the other chapters of the document on card *n*, ranked by the current query, numbered so they can be opened. It covers the case the dedup would otherwise hide: the right book, wrong chapter.
+
+Two smaller ones: a category that runs out of candidates is completed with its domain, with a warning; and `--abrir` / `--estado` no longer load the index or the model — the session file keeps the path and offset of each card, which also shrank it from 5 MB to 12 KB.
+
+### The resident server
+
+Measured on 2026-09-16: each `consultar.py` call took 8–19 s, of which **~0.4 s was work** (matrix product, BM25, RRF). The rest was loading the 80 MB JSON, the 175 MB `.npz`, the embedding model (3–9 s) and the 1.1 GB cross-encoder (3 s) — every call, because every call is a new process.
+
+```bash
+python motor/servidor.py            # stays up; Ctrl+C to stop
+python motor/servidor.py --porta 8766
+```
+
+Nothing changes for the caller. `consultar.py` probes the port for 0.1 s before loading anything; if the server answers it sends its argv and prints the reply, otherwise it runs locally as before and says on stderr how to start the server. `--local` forces the old path; `CONSULTAR_PORTA` or `--porta` change the port. Rounds drop to under 1 s.
+
+It is stdlib `http.server`, one request at a time, bound to `127.0.0.1` only. It reloads the semantic index when the file's mtime changes and the BM25 index when its file changes, so a reindex does not need a restart.
 
 ---
 
@@ -449,6 +502,9 @@ A category that exists in the library but in no domain is included in **all** of
 | heading/footer detection, cleanup | `extrair.py` |
 | what counts as a worthless chapter | `qualidade.py` |
 | ranking | `buscar.py` (`bm25`, `_PARADAS`) |
+| fusion pool, cards per round, Rocchio weights | `consultar.py` (`POOL`, `PALAVRAS_CARTAO`, `ALFA`/`BETA`/`GAMA`) |
+| what counts as a bibliography block | `fatiar.py` (`separar_referencias`, `_MARCA_BIBLIO`) |
+| server port | `servidor.py` / `CONSULTAR_PORTA` |
 | where the library lives | `raiz.py` |
 
 ---
@@ -458,8 +514,9 @@ A category that exists in the library but in no domain is included in **all** of
 - **Tables become sequences of numbers.** Math formulas become noise. Two-column PDFs can scramble reading order. This is structural, not a bug to be fixed.
 - **Category classification is deterministic keyword matching. It errs.** Trust the search, which scans the full text, over the category.
 - **The graph measures shared vocabulary**, so it sometimes groups by language rather than by topic.
-- **The code and CLI flags are in Portuguese.** `buscar` = search, `processar` = process, `--seco` = dry run, `--raiz` = root, `--categoria` = category. The docs are bilingual; the code was not rewritten, because renaming a working system is how working systems break. A full glossary is in [LEIAME.md](LEIAME.md#glossario-pt--en).
+- **The code and CLI flags are in Portuguese.** `buscar` = search, `processar` = process, `--seco` = dry run, `--raiz` = root, `--categoria` = category. The docs are bilingual; the code was not rewritten, because renaming a working system is how working systems break. A full glossary is in [LEIAME.md](LEIAME.md#glossário-pt--en).
 - **First indexing is slow** — roughly 40 minutes of CPU for ~90k passages. After that it is incremental and a new book costs seconds.
+- **Every CLI call pays 8–19 s of model loading** unless `servidor.py` is up. The work itself is under half a second.
 - **Everything here was built for one person's shelf and then generalized.** Where a default looks arbitrary, it probably encodes a measurement on a corpus that is not yours. Re-measure.
 
 ---

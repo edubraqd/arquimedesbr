@@ -5,39 +5,47 @@ de mensagem **fria**" trazia o *cold start problem* de um livro de sistemas de
 busca e um capitulo de prompt engineering de um livro de LLM. Recortar antes de
 ranquear tira esse tipo de vizinho de perto.
 
-Medido em 07/09/2026 com as 53 perguntas do `gabarito.py` contra o indice
-inteiro, no nivel de documento (`avaliar_dominio.py`):
+Remedido em 10/09/2026 com o gabarito novo de **140 perguntas** contra o indice
+inteiro -- 178 documentos, 210.526 passagens (`avaliar_dominio.py`; log em
+`log-avaliacao-140q.txt`). Nao compare com as versoes anteriores deste
+docstring: o gabarito tinha 53 perguntas e cresceu na mesma data.
 
-| Metodo                          | hit@1 | hit@3 |   MRR |
-|---------------------------------|-------|-------|-------|
-| BM25 bilingue                   |  8/53 | 39/53 | 0,456 |
-| BM25 + `--dominio`              | 16/53 | 42/53 | 0,547 |
-| BM25 + `--categoria`            | 32/53 | 47/53 | 0,746 |
-| semantico                       | 20/53 | 34/53 | 0,543 |
-| semantico + `--dominio`         | 21/53 | 36/53 | 0,567 |
-| semantico + `--categoria`       | 37/53 | 46/53 | 0,806 |
-| semantico + rerank              | 29/53 | 41/53 | 0,669 |
-| semantico + rerank + `--dominio`   | 32/53 | 43/53 | 0,710 |
-| semantico + rerank + `--categoria` | 43/53 | 48/53 | 0,869 |
+| Metodo                          |    hit@1 |    hit@3 |   MRR | tempo |
+|---------------------------------|----------|----------|-------|-------|
+| BM25 bilingue                   |   19/140 |  112/140 | 0,480 |   2 s |
+| BM25 + `--dominio`              |   50/140 |  116/140 | 0,605 |   3 s |
+| BM25 + `--categoria`            |   97/140 |  129/140 | 0,816 |   3 s |
+| semantico                       |   47/140 |   86/140 | 0,501 |  49 s |
+| semantico + `--dominio`         |   51/140 |   88/140 | 0,531 |  24 s |
+| semantico + `--categoria`       |   82/140 |  115/140 | 0,719 |   6 s |
+| semantico + rerank              |   73/140 |  102/140 | 0,643 | 759 s |
+| semantico + rerank + `--dominio`   | 77/140 |  108/140 | 0,679 |1324 s |
+| semantico + rerank + `--categoria` |100/140 |  121/140 | 0,807 | ~570 s|
 
-Duas leituras que importam, e a segunda incomoda:
+Tres leituras que importam, e a ultima muda o uso:
 
-1. `--dominio` rende muito no BM25 (8 -> 16 acertos de primeira): busca lexical
+1. `--dominio` rende muito no BM25 (19 -> 50 acertos de primeira): busca lexical
    colide termo entre dominios com facilidade.
-2. **No semantico ele quase nao rende** — 20 -> 21 sem reranker, 29 -> 32 com.
+2. **No semantico ele quase nao rende** -- 47 -> 51 sem reranker, 73 -> 77 com.
    O embedding ja separa dominio sozinho; o que sobra de ruido vem de dentro do
-   dominio, e para esse o remedio e `--categoria` (29 -> 43).
+   dominio, e para esse o remedio e `--categoria` (73 -> 100).
+3. **A media acima soma dois comportamentos opostos.** Fatiado por dominio do
+   alvo (`avaliar_por_estrato.py`, hit@1/hit@3):
 
-Por isso `comercial` e `tecnico` existem separados em vez de a base ter sido
-podada: python, rust e ML nao servem para escrever copy, mas servem para mexer
-no codigo dos proprios projetos. O que estava errado era misturar os dois na
-mesma consulta, nao ter os dois na base.
+   | corte                  | BM25+cat |  sem+cat | rerank+cat |
+   |------------------------|----------|----------|------------|
+   | comercial (56 livros)  |  33 / 50 |  37 / 48 |  **44 / 49** |
+   | tecnico (74 papers)    |**58 / 69**| 41 / 59 |    50 / 64 |
+   | pessoal (9)            |   6 / 9  |   4 / 7  |     6 / 8  |
 
-Os numeros acima usam o dominio e a categoria **do alvo**, entao sao teto: medem
-o ganho de quem escolhe o recorte certo. Errar dominio e dificil; errar
-categoria e facil, e nao esta medido aqui.
+   No livro o reranker paga; **no paper o BM25 bate o caminho caro, em 3 s
+   contra ~570**. O `--dominio` deixou de ser so um filtro de ruido: ele agora
+   diz **qual motor usar**.
 
-Sem `--dominio` nada muda: a busca continua varrendo tudo.
+Diluicao: de 77 para 102 documentos nada mudou; de 102 para 178 (+75%), medido
+com o gabarito antigo de 53, o topo caiu de 44 para 42 no hit@1 e de 48 para 45
+no hit@3 -- 9 das 9 linhas cairam ou empataram. Parte era artefato de pergunta
+parada contra corpus crescendo; o gabarito de 140 corrige isso.
 """
 from __future__ import annotations
 
@@ -72,6 +80,8 @@ DOMINIOS: dict[str, tuple[str, ...]] = {
         "dados-ml",
         "matematica",
         "busca-recuperacao",
+        # entrou em 13/09/2026 com os papers de ASR/Whisper
+        "audio-fala",
     ),
     "pessoal": (
         "treino-endurance",

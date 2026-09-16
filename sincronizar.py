@@ -117,6 +117,19 @@ def main() -> int:
         if not args.seco:
             alvo.write_text(texto, encoding="utf-8")
 
+    # o recorte de categoria por agente das 140 perguntas do gabarito de exemplo:
+    # sem ele o avaliar_consultar.py para. Nao e livro, pode vir.
+    for nome in ("categorias_agente.json",):
+        f = origem / nome
+        if f.exists():
+            alvo = DESTINO / nome
+            if not alvo.exists() or alvo.read_bytes() != f.read_bytes():
+                mudados.append((nome, "novo" if not alvo.exists() else "atualizado", []))
+                if not args.seco:
+                    shutil.copyfile(f, alvo)
+            else:
+                iguais += 1
+
     for f in sorted(DESTINO.glob("*.py")):
         if f.name in SO_DO_REPO:
             continue

@@ -10,6 +10,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+import qualidade
+
 ALVO_PALAVRAS = 8000       # tamanho de conforto por arquivo
 MAX_PALAVRAS = 12000       # acima disso o capitulo e dividido em partes
 MIN_PALAVRAS = 400         # abaixo disso gruda no capitulo anterior
@@ -111,6 +113,61 @@ def _cortes_do_texto(paginas):
     return cortes if len(cortes) >= 3 else None
 
 
+# -------------------------------------------------------------- referencias
+
+# Titulo de bibliografia, com ou sem "###", numero ou negrito, sozinho na linha.
+_TITULO_REFERENCIAS = re.compile(
+    r"^\s*(?:#{1,4}\s*)?(?:\*\*)?(?:\d{1,2}[\.\)]?\s*|[A-Z]\.\s*)?"
+    r"(references?|bibliograph(?:y|ie)|refer[eê]ncias(?: bibliogr[aá]ficas)?|"
+    r"bibliografia|works cited|literature cited)(?:\*\*)?\s*:?\s*$",
+    re.IGNORECASE,
+)
+_TITULO_MD = re.compile(r"^#{1,4}\s+\S")
+_MARCA_BIBLIO = re.compile(r"\b(?:19|20)\d\d\b|et al\.|doi|arxiv|pp\.", re.IGNORECASE)
+MIN_PALAVRAS_REFERENCIAS = 150   # menos que isto e mencao, nao bibliografia
+MIN_MARCAS_REFERENCIAS = 10      # anos, "et al.", doi... nas 600 primeiras palavras
+
+
+def separar_referencias(md: str):
+    """(corpo sem a bibliografia, bloco de bibliografia) ou None.
+
+    Paper e capitulo de livro tecnico trazem a bibliografia no fim do texto, e
+    cada entrada dela vira uma passagem no indice competindo com o conteudo.
+    Medido em 16/09/2026: 289 capitulos `util: sim` carregavam 538k palavras
+    de referencias. O bloco vai do ultimo titulo "References"/"Bibliography"
+    ate o proximo titulo markdown que nao pareca entrada de bibliografia
+    (apendice: 148 dos 289 casos tem conteudo depois das referencias). Corta
+    so quando o que vem depois do titulo tem cara de bibliografia -- ano,
+    "et al.", doi -- senao "References" pode ser secao de prosa.
+    """
+    linhas = md.split("\n")
+    pos = None
+    for i, linha in enumerate(linhas):
+        if _TITULO_REFERENCIAS.match(linha):
+            pos = i
+    if pos is None:
+        return None
+    fim = len(linhas)
+    for j in range(pos + 1, len(linhas)):
+        if _TITULO_MD.match(linhas[j]) and not _MARCA_BIBLIO.search(linhas[j]) \
+                and "http" not in linhas[j]:
+            fim = j
+            break
+    bloco = "\n".join(linhas[pos:fim]).strip()
+    palavras = bloco.split()
+    if len(palavras) < MIN_PALAVRAS_REFERENCIAS:
+        return None
+    if len(_MARCA_BIBLIO.findall(" ".join(palavras[:600]))) < MIN_MARCAS_REFERENCIAS:
+        return None
+    corpo = "\n".join(linhas[:pos] + linhas[fim:]).strip()
+    return corpo, bloco
+
+
+def _titulo_das_referencias(bloco: str) -> str:
+    primeira = bloco.split("\n", 1)[0]
+    return re.sub(r"^\W*(?:\d{1,2}[\.\)]?\s*|[A-Z]\.\s*)?", "", primeira).strip("* :") or "References"
+
+
 # ----------------------------------------------------------------- montagem
 
 
@@ -182,10 +239,27 @@ def fatiar(doc) -> list:
                 "ini": atual[0].numero, "fim": atual[-1].numero,
             })
 
-    # capitulo curto demais gruda no anterior
+    # bibliografia no fim do capitulo vira capitulo proprio (util:nao pelo titulo)
+    separados = []
+    for b in brutos:
+        corte = separar_referencias(b["md"])
+        if corte:
+            b["md"] = corte[0]
+            separados.append(b)
+            separados.append({"titulo": _titulo_das_referencias(corte[1]),
+                              "md": corte[1], "ini": b["ini"], "fim": b["fim"]})
+        else:
+            separados.append(b)
+    brutos = separados
+
+    # capitulo curto demais gruda no anterior -- menos secao de apoio (referencias,
+    # indice), que grudada levaria a bibliografia para dentro do conteudo, e
+    # menos o que viria depois de uma, que seria engolido por ela
     compactados = []
     for b in brutos:
-        if compactados and len(b["md"].split()) < MIN_PALAVRAS:
+        if (compactados and len(b["md"].split()) < MIN_PALAVRAS
+                and not qualidade.titulo_e_lixo(b["titulo"])
+                and not qualidade.titulo_e_lixo(compactados[-1]["titulo"])):
             ant = compactados[-1]
             ant["md"] = ant["md"] + "\n\n## " + b["titulo"] + "\n\n" + b["md"]
             ant["fim"] = b["fim"]

@@ -135,6 +135,17 @@ CATEGORIAS = {
          "data poisoning", "model extraction", "trust attack", "seguranca",
          "vulnerability", "vulnerabilidade", "malicious"],
     ),
+    "audio-fala": (
+        "Audio e reconhecimento de fala",
+        # entrou em 13/09/2026 com a leva de papers de ASR para a skill
+        # `transcrever`. Separado de ia-llm e dados-ml: "whisper", "asr" e
+        # "word error rate" nao aparecem em livro de LLM nem de big data, e e
+        # isso que mantem a categoria estreita o bastante para o recorte render.
+        ["speech recognition", "reconhecimento de fala", "asr", "whisper",
+         "word error rate", "wer", "voice activity detection", "vad",
+         "transcription", "transcricao", "speech-to-text", "diarization",
+         "diarizacao", "acoustic model", "spoken", "audio", "hallucinated transcripts"],
+    ),
     "busca-recuperacao": (
         "Busca e recuperacao de informacao",
         # o assunto do proprio motor desta base: sai de dados-ml para nao ficar

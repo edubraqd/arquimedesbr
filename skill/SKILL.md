@@ -117,15 +117,33 @@ three `--passagens` results cost. Measured on the 53-question ground truth:
 ranked first — you need to see it, and you almost always do.
 
 ```bash
-python <motor>/consultar.py "how to answer that it is too expensive" --categoria vendas
+python <motor>/consultar.py "how to answer that it is too expensive" --tambem "price objection" --categoria vendas
 ```
 
-Then act on what you see:
+**Always pass `--tambem` with the question in the other language** (English if
+you wrote it in Portuguese, and vice versa). The engine sums the two embeddings
+and runs BM25 on both strings. Measured on 140 questions it is worth +8 on hit@6
+for no cost at all: you already know both languages, and most shelves are
+mostly English. Each round then fuses the 30 best documents by vector with the
+30 best by BM25 (reciprocal rank) and reranks the final 6 with the
+cross-encoder. `--sem-bm25` turns the fusion off; there is no reason to.
+
+**Read all six cards before choosing.** Card 1 is right in about half the
+questions; the six together in nine out of ten. Opening the first without
+reading the rest throws away the difference.
+
+Then act on what you see — three exits, and only three:
 
 ```bash
 python <motor>/consultar.py --sessao <id> --abrir 2        # full window, that card only
+python <motor>/consultar.py --sessao <id> --mais 2         # other chapters of card 2's document
 python <motor>/consultar.py --sessao <id> --sim 2 --nao 1,3  # none of these: spin again
 ```
+
+`--mais` is for "right book, wrong chapter": it lists the document's other
+chapters ranked by the current query, numbered, and any of them can be
+`--abrir`-ed. Round 2 never repeats a document already shown — a card seen is a
+card spent — so `--mais` is the only way back into a book you have judged.
 
 The second form moves the query with Rocchio (`alpha` 1, `beta` 0.75,
 `gamma` 0.15, from *Introduction to Information Retrieval* ch. 9, which is in
@@ -134,7 +152,21 @@ the session, so the question is not re-embedded.
 
 **Two rounds, never three.** Measured: round 2 adds 5 hits out of 53; round 3
 adds zero. If two rounds have not found it, the library probably does not cover
-the question — say so instead of spinning.
+the question — say so instead of spinning. Or you picked the wrong shelf: try
+the other `--categoria` before giving up. A category that runs dry is completed
+with its domain automatically, with a warning.
+
+**The resident server.** Without it every call pays 8–19 s to load the index
+and the two models; the work itself is under half a second. Start it once and
+leave it:
+
+```bash
+python <motor>/servidor.py
+```
+
+`consultar.py` finds it on its own (port 8766, `CONSULTAR_PORTA` to change) and
+falls back to running locally when it is not there, saying so on stderr. If you
+see that notice repeatedly in a session, start the server.
 
 Use `semantico.py --passagens` below when you already know you want the wide
 window for several results at once. For the normal "find the right chapter"
@@ -163,8 +195,9 @@ python <motor>/avaliar_dominio.py --seco   # ~40s, no reranker
 python <motor>/avaliar_dominio.py          # ~30min, everything
 ```
 
-**Do not use `--hibrido`**: fusing the rankings measures worse than either one
-alone.
+`semantico.py --hibrido` (passage-level fusion, no reranker) is still not
+recommended. The document-level fusion `consultar.py` does by default is a
+different thing and measures better — see step 1.
 
 ### 3. BM25 when the target is literal
 
@@ -291,11 +324,21 @@ reopening a PDF:
 ```bash
 python <motor>/processar.py --revisar --seco   # what would change
 python <motor>/processar.py --revisar
-cd <motor> && python -m unittest test_motor    # 56 tests
+cd <motor> && python -m unittest test_motor    # 159 tests
 ```
 
-The semantic index is keyed by a hash of the body, so `--revisar` does **not**
-force re-embedding anything.
+`--revisar` also cuts the bibliography out of every chapter that ends with one
+(`References`/`Bibliography` up to the next heading that is not an entry) into
+`<chapter>.referencias.md`, marked `util: nao`. Reference entries used to
+compete with prose as passages.
+
+`processar.py` reindexes on its own after writing markdown (incremental,
+atomic, with backup); `--sem-indexar` skips it. If a chapter on disk is newer
+than the index, searches print `indice semantico desatualizado` on stderr and
+carry on — run `python <motor>/semantico.py indexar` when you see it.
+
+The semantic index is keyed by a hash of the body, so a frontmatter-only
+`--revisar` does **not** force re-embedding anything.
 
 ## Honest limits
 
